@@ -32,7 +32,6 @@ BuildRequires:		asciidoc
 BuildRequires:		docbook-style-xsl
 BuildRequires:		libxslt
 BuildRequires:		ncurses-devel
-BuildRequires:		util-linux-ng
 
 %description
 A cli version of the game 2048 for your Linux terminal.
