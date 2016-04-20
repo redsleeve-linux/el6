@@ -1,36 +1,43 @@
 # Conditional for release and snapshot builds. Uncomment for release-builds.
-#global rel_build 1
+%global rel_build	1
 
 # Setup _pkgdocdir if not defined already.
-%{!?_pkgdocdir:%global _pkgdocdir	%{_docdir}/%{name}-%{version}}
+%{!?_pkgdocdir:%global	_pkgdocdir %{_docdir}/%{name}-%{version}}
 
 # Settings used for build from snapshots.
-%{!?rel_build:%global commit		723738c7069e83cd2d4fe1a0593e635839e42b22}
-%{!?rel_build:%global commit_date	20141214}
-%{!?rel_build:%global shortcommit	%(c=%{commit};echo ${c:0:7})}
-%{!?rel_build:%global gitver		git%{commit_date}-%{shortcommit}}
-%{!?rel_build:%global gitrel		.git%{commit_date}.%{shortcommit}}
+%if ! 0%{?rel_build}
+%global commit		4520781f25805bd9e3b0a7b861d55a22baeff7e3
+%global commit_date	20151229
+%global shortcommit	%(c=%{commit};echo ${c:0:7})
+%global gitver		git%{commit_date}-%{shortcommit}
+%global gitrel		.git%{commit_date}.%{shortcommit}
+%endif # 0%%{?rel_build}
 
 # Proper naming for the tarball from github.
-%global gittar %{name}-%{version}%{!?rel_build:-%{gitver}}.tar.gz
+%global gittar		%{name}-%{version}%{!?rel_build:-%{gitver}}.tar.gz
 
-Name:			2048-cli
-Version:		0.9
-Release:		4%{?gitrel}%{?dist}
-Summary:		The game 2048 for your Linux terminal
-%{?el5:Group:		Amusements/Games}
+# No SDL2 on EPEL <= 7.
+%if 0%{?fedora} || 0%{?rhel} >= 8
+%bcond_without sdl
+%else  # 0%%{?fedora} || 0%%{?rhel} >= 8
+%bcond_with sdl
+%endif # 0%%{?fedora} || 0%%{?rhel} >= 8
 
-License:		MIT
-URL:			https://github.com/Tiehuis/%{name}
+Name:		2048-cli
+Version:	0.9.1
+Release:	1%{?gitrel}%{?dist}
+Summary:	The game 2048 for your Linux terminal
+
+License:	MIT
+URL:		https://github.com/Tiehuis/%{name}
+%if 0%{?rel_build}
 # Sources for release-builds.
-%{?rel_build:Source0:	%{url}/archive/v%{version}.tar.gz#/%{gittar}}
+Source0:	%{url}/archive/v%{version}.tar.gz#/%{gittar}
+%else  # 0%%{?rel_build}
 # Sources for snapshot-builds.
-%{!?rel_build:Source0:	%{url}/archive/%{commit}.tar.gz#/%{gittar}}
+Source0:	%{url}/archive/%{commit}.tar.gz#/%{gittar}
+%endif # 0%%{?rel_build}
 
-%{?el5:BuildRoot:	%(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)}
-BuildRequires:		asciidoc
-BuildRequires:		docbook-style-xsl
-BuildRequires:		libxslt
 BuildRequires:		ncurses-devel
 
 %description
@@ -38,11 +45,24 @@ A cli version of the game 2048 for your Linux terminal.
 
 
 %package nocurses
-Summary:		The game 2048 for your Linux terminal (non-ncurses)
-%{?el5:Group:		Amusements/Games}
+Summary:	The game 2048 for your Linux terminal (non-ncurses)
 
 %description nocurses
 A non-ncurses cli version of the game 2048 for your Linux terminal.
+
+
+%if %{with sdl}
+%package sdl
+Summary:	The game 2048 for your Linux terminal (SDL)
+
+BuildRequires:	SDL2_ttf-devel
+BuildRequires:	liberation-mono-fonts
+
+Requires:	liberation-mono-fonts
+
+%description sdl
+A SDL version of the game 2048 for your Linux terminal.
+%endif # %%{with sdl}
 
 
 %prep
@@ -50,39 +70,77 @@ A non-ncurses cli version of the game 2048 for your Linux terminal.
 
 
 %build
-%{__make} %{?_smp_mflags} 2048 2048nc man			\
-	CFLAGS='%{optflags}' LDFLAGS='%{?__global_ldflags}'
+export TTF_FONT_PATH="%{_datadir}/fonts/liberation/LiberationMono-Regular.ttf"
+%configure || :
+%{__make} %{?_smp_mflags} terminal
+%{__mv} -f 2048 2048nc
+%if %{with sdl}
+%{__make} %{?_smp_mflags} sdl
+%{__mv} -f 2048 2048sdl
+%endif # %%{with sdl}
+%{__make} %{?_smp_mflags} curses
 
 
 %install
-%{?el5:%{__rm} -rf %{buildroot}}
-
 # There is no install-target in Makefile.
-%{__mkdir} -p %{buildroot}%{_bindir}				\
+%{__mkdir} -p	%{buildroot}%{_bindir}				\
 		%{buildroot}%{_mandir}/man1			\
 		%{buildroot}%{_pkgdocdir}
 %{__install} -pm 0755 2048 2048nc %{buildroot}%{_bindir}
-%{__install} -pm 0644 man/*.1 %{buildroot}%{_mandir}/man1
-%{__install} -pm 0644 man/2048*.1.txt LICENSE README.md		\
-		%{buildroot}%{_pkgdocdir}
-
-
-%{?el5:%clean}
-%{?el5:%{__rm} -rf %{buildroot}}
+%{__install} -pm 0644 man/2048.1 %{buildroot}%{_mandir}/man1/2048.1
+%{__install} -pm 0644 man/2048.1 %{buildroot}%{_mandir}/man1/2048nc.1
+%if %{with sdl}
+%{__install} -pm 0755 2048sdl %{buildroot}%{_bindir}
+%{__install} -pm 0644 man/2048.1 %{buildroot}%{_mandir}/man1/2048sdl.1
+%endif # %%{with sdl}
 
 
 %files
-%doc %{_pkgdocdir}
+%{!?_licensedir:%global license %doc}
+%license LICENSE
+%doc README.md
 %{_bindir}/2048
 %{_mandir}/man1/2048.1*
 
 %files nocurses
+# Pickup license-files from main-pkg's license-dir
+# If there's no license-dir they are picked up by %%doc previously
+%{?_licensedir:%license %{_datadir}/licenses/%{name}*}
 %doc %{_pkgdocdir}
 %{_bindir}/2048nc
 %{_mandir}/man1/2048nc.1*
 
+%if %{with sdl}
+%files sdl
+# Pickup license-files from main-pkg's license-dir
+# If there's no license-dir they are picked up by %%doc previously
+%{?_licensedir:%license %{_datadir}/licenses/%{name}*}
+%doc %{_pkgdocdir}
+%{_bindir}/2048sdl
+%{_mandir}/man1/2048sdl.1*
+%endif # %%{with sdl}
+
 
 %changelog
+* Wed Mar 30 2016 Björn Esser <fedora@besser82.io> - 0.9.1-1
+- new upstream release 0.9.1
+
+* Tue Mar 29 2016 Björn Esser <fedora@besser82.io> - 0.9.1-0.2.git20151229.4520781
+- properly apply CFLAGS, without clobbering the Makefile-preset
+
+* Tue Mar 29 2016 Björn Esser <fedora@besser82.io> - 0.9.1-0.1.git20151229.4520781
+- update to new snapshot git20151229.4520781
+- handle %%license and %%doc properly
+
+* Wed Feb 03 2016 Fedora Release Engineering <releng@fedoraproject.org> - 0.9-7.git20150225.dc9adea
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_24_Mass_Rebuild
+
+* Thu Jun 18 2015 Björn Esser <bjoern.esser@gmail.com> - 0.9-6.git20150225.dc9adea
+- update to new snapshot git20150225.dc9adea
+
+* Tue Jun 16 2015 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 0.9-5.git20141214.723738c
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_23_Mass_Rebuild
+
 * Sun Dec 14 2014 Björn Esser <bjoern.esser@gmail.com> - 0.9-4.git20141214.723738c
 - update to new snapshot git20141214.723738c, obsoletes Patch0
 
