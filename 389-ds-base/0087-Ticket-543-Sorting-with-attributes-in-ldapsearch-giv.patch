@@ -1,0 +1,68 @@
+From 59d71e56a68c2fb6a52875767d0665dd76a78181 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@totoro.usersys.redhat.com>
+Date: Thu, 31 Jan 2013 16:45:28 -0800
+Subject: [PATCH 87/99] Ticket #543 - Sorting with attributes in ldapsearch
+ gives incorrect result
+
+Bug description: In the server side sorting compare function
+compare_entries_sv, if multiple attribute types are specified,
+the sort spec for each attribute is scanned one by one in the
+for loop.  In the for loop, instead of using the "current"
+spec, the first spec is kept using.  If the attribute types
+have different syntaxes (e.g., cis, tel), then the first
+syntax is unexpectedly selected for the second syntax.
+
+Fix description: This patch correctly uses the current spec
+in the for loop.
+
+Reviewed by Nathan (Thank you!!)
+(cherry picked from commit 95f425da43b380163c2ddae66fc77d2b863a00e5)
+(cherry picked from commit 855d2890bc57482d7c22c6821a15b74f8053dc29)
+---
+ ldap/servers/slapd/back-ldbm/sort.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/sort.c b/ldap/servers/slapd/back-ldbm/sort.c
+index 7768737..4164147 100644
+--- a/ldap/servers/slapd/back-ldbm/sort.c
++++ b/ldap/servers/slapd/back-ldbm/sort.c
+@@ -552,7 +552,7 @@ static int compare_entries_sv(ID *id_a, ID *id_b, sort_spec *s,baggage_carrier *
+ 		 * doesn't try to free them. We need to note at the right place that
+ 		 * we're on the matchrule path, and accordingly free the keys---this turns out
+ 		 * to be when we free the indexer */ 
+-		if (NULL == s->matchrule) {
++		if (NULL == this_one->matchrule) {
+ 			/* Non-match rule case */
+ 		    valuearray_get_bervalarray(valueset_get_valuearray(&attr_a->a_present_values),&value_a);
+ 		    valuearray_get_bervalarray(valueset_get_valuearray(&attr_b->a_present_values),&value_b);
+@@ -564,22 +564,22 @@ static int compare_entries_sv(ID *id_a, ID *id_b, sort_spec *s,baggage_carrier *
+ 
+ 			valuearray_get_bervalarray(valueset_get_valuearray(&attr_a->a_present_values),&actual_value_a);
+ 			valuearray_get_bervalarray(valueset_get_valuearray(&attr_b->a_present_values),&actual_value_b);
+-			matchrule_values_to_keys(s->mr_pb,actual_value_a,&temp_value);
++			matchrule_values_to_keys(this_one->mr_pb,actual_value_a,&temp_value);
+ 			/* Now copy it, so the second call doesn't crap on it */
+ 			value_a = slapi_ch_bvecdup(temp_value); /* Really, we'd prefer to not call the chXXX variant...*/
+-			matchrule_values_to_keys(s->mr_pb,actual_value_b,&value_b);
++			matchrule_values_to_keys(this_one->mr_pb,actual_value_b,&value_b);
+ 			if (actual_value_a) ber_bvecfree(actual_value_a);
+ 			if (actual_value_b) ber_bvecfree(actual_value_b);
+ 		}
+ 		/* Compare them */
+ 		if (!order) {
+-			result = sort_attr_compare(value_a, value_b, s->compare_fn);
++			result = sort_attr_compare(value_a, value_b, this_one->compare_fn);
+ 		} else {
+ 			/* If reverse, invert the sense of the comparison */
+-			result = sort_attr_compare(value_b, value_a, s->compare_fn);
++			result = sort_attr_compare(value_b, value_a, this_one->compare_fn);
+ 		}
+ 		/* Time to free up the attributes allocated above */
+-		if (NULL != s->matchrule) {
++		if (NULL != this_one->matchrule) {
+ 			ber_bvecfree(value_a);
+ 		} else {
+ 			ber_bvecfree(value_a);
+-- 
+1.8.1.4
+

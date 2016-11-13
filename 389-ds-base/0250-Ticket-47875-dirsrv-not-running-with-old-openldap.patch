@@ -1,0 +1,33 @@
+From 0f0951dece5a82361aa15ee1d0271890f3026052 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 15 Aug 2014 16:13:46 -0700
+Subject: [PATCH 250/251] Ticket #47875 - dirsrv not running with old openldap
+
+Description: AC_SUBST(ldap_lib_ldif) was missing from configure.ac
+for @ldap_lib_dir@.
+
+https://fedorahosted.org/389/ticket/47875
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+(cherry picked from commit 0ae55bcd61497c2fa7aaade40fe4ff6c91216325)
+(cherry picked from commit 1bb438916825d72df023ca5f67fa7d8b7e6e36e3)
+(cherry picked from commit dce84e1d4a12dbe9a461981d076ca3d0e17ef56c)
+---
+ configure.ac | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/configure.ac b/configure.ac
+index df02cff..b52fbcc 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -653,6 +653,7 @@ AC_SUBST(openldap_inc)
+ AC_SUBST(openldap_lib)
+ AC_SUBST(openldap_libdir)
+ AC_SUBST(openldap_bindir)
++AC_SUBST(ldap_lib_ldif)
+ AC_SUBST(ldaptool_bindir)
+ AC_SUBST(ldaptool_opts)
+ AC_SUBST(plainldif_opts)
+-- 
+1.8.1.4
+

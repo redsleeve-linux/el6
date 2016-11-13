@@ -1,0 +1,350 @@
+From 8a5273d62a8785e6443aca11d6c06e5650884911 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Mon, 3 Jun 2013 17:17:24 -0400
+Subject: [PATCH 89/99] Coverity Fixes (part 1)
+
+11648 - string length miscalulation (ldclt.c)
+11655 - unchecked return value (agtmmap.c)
+11656 - unchecked return value (dblayer.c)
+11657 - unchecked return value (daemon.c)
+11658 - unchecked return value (daemon.c)
+11660 - unchecked return value (log.c)
+11661 - unchecked return value (main.c)
+11662 - unchecked return value (ssl.c)
+11668 - Same on both sides (repl5_protocol_util.c)
+11669 - Same on both sides (ssl.c)
+11670 - Same on both sides (util.c)
+11673 - Copy-and-paste error (tools/rsearch/sdattable.c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=970221
+
+Reviewed by: Noriko(Thanks!)
+(cherry picked from commit 2b5aecb77784a9cf68fe29204f15bd4b61159d6d)
+(cherry picked from commit f771f95f3f34442a9c238b687227d1d17a1015e7)
+---
+ .../plugins/replication/repl5_protocol_util.c      |  2 +-
+ ldap/servers/slapd/agtmmap.c                       | 69 +++++++++++-----------
+ ldap/servers/slapd/back-ldbm/dblayer.c             |  7 ++-
+ ldap/servers/slapd/daemon.c                        | 29 +++++----
+ ldap/servers/slapd/log.c                           | 18 +++++-
+ ldap/servers/slapd/main.c                          |  5 +-
+ ldap/servers/slapd/ssl.c                           | 17 ++++--
+ ldap/servers/slapd/tools/ldclt/ldclt.c             |  4 +-
+ ldap/servers/slapd/tools/rsearch/sdattable.c       |  2 +-
+ ldap/servers/slapd/util.c                          |  2 +-
+ 10 files changed, 98 insertions(+), 57 deletions(-)
+
+diff --git a/ldap/servers/plugins/replication/repl5_protocol_util.c b/ldap/servers/plugins/replication/repl5_protocol_util.c
+index 30d211a..4449170 100644
+--- a/ldap/servers/plugins/replication/repl5_protocol_util.c
++++ b/ldap/servers/plugins/replication/repl5_protocol_util.c
+@@ -603,7 +603,7 @@ release_replica(Private_Repl_Protocol *prp)
+ 		struct berval *data = NULL;
+ 
+ 		/* Check the message id's match */
+-		if (sent_message_id != sent_message_id)
++		if (sent_message_id != ret_message_id)
+ 		{
+ 			int operation, error;
+ 			conn_get_error(prp->conn, &operation, &error);
+diff --git a/ldap/servers/slapd/agtmmap.c b/ldap/servers/slapd/agtmmap.c
+index d82da5f..f18138a 100644
+--- a/ldap/servers/slapd/agtmmap.c
++++ b/ldap/servers/slapd/agtmmap.c
+@@ -187,46 +187,49 @@ agt_mopen_stats (char * statsfile, int mode, int *hdl)
+ 
+ 	           if ( fd < 0 )
+ 	           {
+-			err = errno;
++                   err = errno;
+ #if (0)
+-			fprintf (stderr, "returning errno =%d from %s(line: %d)\n", err, __FILE__, __LINE__);
++                   fprintf (stderr, "returning errno =%d from %s(line: %d)\n", err, __FILE__, __LINE__);
+ #endif
+-	                rc = err;
+-			goto bail;
+-                   }
++                   rc = err;
++                   goto bail;
++               }
+ 		
+-		   fstat (fd, &fileinfo);
+-
+-		   sz = sizeof (struct agt_stats_t);
+-
+-		   if (fileinfo.st_size < sz)
+-		   {
+-			   /* Without this we will get segv when we try to read/write later */
+-			   buf = calloc (1, sz);
+-			   (void)write (fd, buf, sz);
+-			   free (buf);
+-		   }
+-
+-		   fp = mmap (NULL, sz, (PROT_READ | PROT_WRITE), MAP_SHARED, fd, 0);
+-
+-		   if (fp == (caddr_t) -1)
+-		   {
+-			err = errno;
+-			close (fd);
++               if(fstat (fd, &fileinfo) != 0){
++                   rc = errno;
++                   goto bail;
++		       }
++
++               sz = sizeof (struct agt_stats_t);
++
++               if (fileinfo.st_size < sz)
++               {
++                   /* Without this we will get segv when we try to read/write later */
++                   buf = calloc (1, sz);
++                   (void)write (fd, buf, sz);
++                   free (buf);
++               }
++
++               fp = mmap (NULL, sz, (PROT_READ | PROT_WRITE), MAP_SHARED, fd, 0);
++
++               if (fp == (caddr_t) -1)
++               {
++                   err = errno;
++                   close (fd);
+ #if (0)
+-			fprintf (stderr, "returning errno =%d from %s(line: %d)\n", err, __FILE__, __LINE__);
++                   fprintf (stderr, "returning errno =%d from %s(line: %d)\n", err, __FILE__, __LINE__);
+ #endif
+-			rc = err;
+-			goto bail;
+-		   }
++                   rc = err;
++                   goto bail;
++               }
+ 
+-		   mmap_tbl [1].maptype = AGT_MAP_RDWR;
+-		   mmap_tbl [1].fd 	= fd;
+-		   mmap_tbl [1].fp 	= fp;
+-		   *hdl = 1;
++               mmap_tbl [1].maptype = AGT_MAP_RDWR;
++               mmap_tbl [1].fd = fd;
++               mmap_tbl [1].fp = fp;
++               *hdl = 1;
+ 
+-		   rc = 0;
+-                   break;
++               rc = 0;
++           break;
+ 	} /* end switch */
+ #else
+ 	/* _WIN32 */
+diff --git a/ldap/servers/slapd/back-ldbm/dblayer.c b/ldap/servers/slapd/back-ldbm/dblayer.c
+index 8696834..960d99e 100644
+--- a/ldap/servers/slapd/back-ldbm/dblayer.c
++++ b/ldap/servers/slapd/back-ldbm/dblayer.c
+@@ -4478,7 +4478,12 @@ static int checkpoint_threadmain(void *param)
+                                 "%s.old", *listp);
+                     checkpoint_debug_message(debug_checkpointing,
+                                 "Renaming %s -> %s\n",*listp, new_filename, 0);
+-                    rename(*listp, new_filename);    
++                    if(rename(*listp, new_filename) != 0){
++                    	LDAPDebug(LDAP_DEBUG_ANY, "checkpoint_threadmain: failed to rename log (%s) to (%s)\n",
++                    	        *listp, new_filename, 0);
++                    	rval = -1;
++                    	goto error_return;
++                    }
+                 }
+             }
+             slapi_ch_free((void**)&list);
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index 221b156..524a6aa 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -3384,8 +3384,14 @@ createsignalpipe( void )
+ 	}
+ 	writesignalpipe = PR_FileDesc2NativeHandle(signalpipe[1]);
+ 	readsignalpipe = PR_FileDesc2NativeHandle(signalpipe[0]);
+-	fcntl(writesignalpipe, F_SETFD, O_NONBLOCK);
+-	fcntl(readsignalpipe, F_SETFD, O_NONBLOCK);
++	if(fcntl(writesignalpipe, F_SETFD, O_NONBLOCK) == -1){
++		LDAPDebug( LDAP_DEBUG_ANY,"createsignalpipe: failed to set FD for write pipe (%d).\n",
++				errno, 0, 0 );
++	}
++	if(fcntl(readsignalpipe, F_SETFD, O_NONBLOCK) == -1){
++		LDAPDebug( LDAP_DEBUG_ANY,"createsignalpipe: failed to set FD for read pipe (%d).\n",
++				errno, 0, 0);
++	}
+ #endif
+ 
+ 	return( 0 );
+@@ -3605,7 +3611,7 @@ void configure_ns_socket( int * ns )
+ {
+ 
+ 	int enable_nagle = config_get_nagle();
+-        int on;
++	int on, rc;
+ 
+ #if defined(LINUX)
+ 	/* On Linux we use TCP_CORK so we must enable nagle */
+@@ -3615,19 +3621,18 @@ void configure_ns_socket( int * ns )
+ 	if ( have_send_timeouts ) {
+ 		daemon_configure_send_timeout( *ns, config_get_ioblocktimeout() );
+ 	}
+-
+-
++	/* set the nagle */
+ 	if ( !enable_nagle ) {
+-	        on = 1;
+-	        setsockopt( *ns, IPPROTO_TCP, TCP_NODELAY, (char * ) &on, sizeof(on) );
++		on = 1;
+ 	} else {
+-	        on = 0;
+-		setsockopt( *ns, IPPROTO_TCP, TCP_NODELAY, (char * ) &on, sizeof(on) );
+-	} /* else (!enable_nagle) */
+-
++		on = 0;
++	}
++	/* check for errors */
++	if((rc = setsockopt( *ns, IPPROTO_TCP, TCP_NODELAY, (char * ) &on, sizeof(on) ) != 0)){
++		LDAPDebug( LDAP_DEBUG_ANY,"configure_ns_socket: Failed to configure socket (%d).\n", rc, 0, 0);
++	}
+ 
+ 	return;
+-
+ }
+ 
+ 
+diff --git a/ldap/servers/slapd/log.c b/ldap/servers/slapd/log.c
+index a765001..9b3f640 100644
+--- a/ldap/servers/slapd/log.c
++++ b/ldap/servers/slapd/log.c
+@@ -3789,6 +3789,9 @@ log__open_errorlogfile(int logfile_state, int locked)
+ 	struct logfileinfo	*logp;
+ 	char			buffer[BUFSIZ];
+ 	struct passwd	*pw = NULL;
++#ifndef _WIN32
++	int rc = 0;
++#endif
+ 
+ 	slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+ 
+@@ -3886,7 +3889,20 @@ log__open_errorlogfile(int logfile_state, int locked)
+ 	 * alternate ns-slapd modes, such as db2bak, tries to log an error
+ 	 * at startup, it will create the logfile as root! 
+ 	 */
+-	slapd_chown_if_not_owner(loginfo.log_error_file, pw->pw_uid, -1);
++	if((rc = slapd_chown_if_not_owner(loginfo.log_error_file, pw->pw_uid, -1)) != 0){
++		PR_snprintf(buffer, sizeof(buffer),
++				"Failed to chown log file %s: error %d (%s); Exiting...",
++				loginfo.log_error_file, errno, slapd_system_strerror(errno));
++		log__error_emergency(buffer, 1, locked);
++		if (!locked) LOG_ERROR_UNLOCK_WRITE();
++		/* failed to write to the errors log.  should not continue. */
++		g_set_shutdown( SLAPI_SHUTDOWN_EXIT );
++		/*if I have an old log file -- I should log a message
++		** that I can't open the new file. Let the caller worry
++		** about logging message.
++		*/
++		return LOG_UNABLE_TO_OPENFILE;
++	}
+ #endif
+ 
+ 	loginfo.log_error_fdes = fp;
+diff --git a/ldap/servers/slapd/main.c b/ldap/servers/slapd/main.c
+index 84ce01d..9938c01 100644
+--- a/ldap/servers/slapd/main.c
++++ b/ldap/servers/slapd/main.c
+@@ -247,7 +247,10 @@ chown_dir_files(char *name, struct passwd *pw, PRBool strip_fn, PRBool both)
+     while( (entry = PR_ReadDir(dir , PR_SKIP_BOTH )) !=NULL ) 
+     {
+       PR_snprintf(file,MAXPATHLEN+1,"%s/%s",log,entry->name);
+-      slapd_chown_if_not_owner( file, pw->pw_uid, both?pw->pw_gid:-1 ); 
++      if((rc = slapd_chown_if_not_owner( file, pw->pw_uid, both?pw->pw_gid:-1 )) != 0){
++    	  LDAPDebug(LDAP_DEBUG_ANY, "chown_dir_files: file (%s) chown failed (%d) %s.\n",
++    			  file, errno, slapd_system_strerror(errno));
++      }
+     }
+     PR_CloseDir( dir );
+   }
+diff --git a/ldap/servers/slapd/ssl.c b/ldap/servers/slapd/ssl.c
+index 0aab53d..f515b8e 100644
+--- a/ldap/servers/slapd/ssl.c
++++ b/ldap/servers/slapd/ssl.c
+@@ -360,7 +360,7 @@ _conf_setciphers(char *ciphers)
+         if(t)
+             ciphers = t;
+     }
+-    if (unsuplist && unsuplist) {
++    if (unsuplist && *unsuplist) {
+         char *strsup = charray2str(suplist, ",");
+         char *strunsup = charray2str(unsuplist, ",");
+         slapd_SSL_warn("Security Initialization: FIPS mode is enabled - only the following "
+@@ -614,9 +614,18 @@ slapd_nss_init(int init_ssl, int config_available)
+ 		certdb_file_name = slapi_ch_smprintf("%s/cert8.db", certdir);
+ 		keydb_file_name = slapi_ch_smprintf("%s/key3.db", certdir);
+ 		secmoddb_file_name = slapi_ch_smprintf("%s/secmod.db", certdir);
+-		chmod(certdb_file_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP );
+-		chmod(keydb_file_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP );
+-		chmod(secmoddb_file_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP );
++		if(chmod(certdb_file_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP )){
++			LDAPDebug(LDAP_DEBUG_ANY, "slapd_nss_init: chmod failed for file %s error (%d) %s.\n",
++					certdb_file_name, errno, slapd_system_strerror(errno));
++		}
++		if(chmod(keydb_file_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP )){
++			LDAPDebug(LDAP_DEBUG_ANY, "slapd_nss_init: chmod failed for file %s error (%d) %s.\n",
++					keydb_file_name, errno, slapd_system_strerror(errno));
++		}
++		if(chmod(secmoddb_file_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP )){
++			LDAPDebug(LDAP_DEBUG_ANY, "slapd_nss_init: chmod failed for file %s error (%d) %s.\n",
++					secmoddb_file_name, errno, slapd_system_strerror(errno));
++		}
+ 	}
+ 
+     /****** end of NSS Initialization ******/
+diff --git a/ldap/servers/slapd/tools/ldclt/ldclt.c b/ldap/servers/slapd/tools/ldclt/ldclt.c
+index 27a2412..2a45c76 100644
+--- a/ldap/servers/slapd/tools/ldclt/ldclt.c
++++ b/ldap/servers/slapd/tools/ldclt/ldclt.c
+@@ -1497,7 +1497,7 @@ basicInit (void)
+     /*
+      * Parse the deference attribute value
+      */
+-    mctx.attRefDef= (char *)malloc(strlen(mctx.attrpl+i+1) + 1);
++    mctx.attRefDef= (char *)malloc(strlen(mctx.attrpl + i) + 2);
+     if (mctx.attRefDef== NULL) {
+       printf ("Error: unable to allocate memory for attRefDef\n");
+       return (-1);
+@@ -1525,7 +1525,7 @@ basicInit (void)
+     /*
+      * Parse the attribute value
+      */
+-    mctx.attrplFile = (char *)malloc(strlen(mctx.attrpl+i+1) + 1);
++    mctx.attrplFile = (char *)malloc(strlen(mctx.attrpl+i) + 2);
+     if (mctx.attrplFile == NULL) {
+       printf ("Error: unable to allocate memory for attreplfile\n");
+       return (-1);
+diff --git a/ldap/servers/slapd/tools/rsearch/sdattable.c b/ldap/servers/slapd/tools/rsearch/sdattable.c
+index df1c152..c0274d0 100644
+--- a/ldap/servers/slapd/tools/rsearch/sdattable.c
++++ b/ldap/servers/slapd/tools/rsearch/sdattable.c
+@@ -183,7 +183,7 @@ int sdt_save(SDatTable *sdt, const char *filename)
+ 	    PR_Write(fd, sdt->dns[i], strlen(sdt->dns[i]));
+ 	    PR_Write(fd, "\n", 1);
+ 	}
+-	if (sdt->dns[i]) {
++	if (sdt->uids[i]) {
+ 	    PR_Write(fd, "uid: ", 5);
+ 	    PR_Write(fd, sdt->uids[i], strlen(sdt->uids[i]));
+ 	    PR_Write(fd, "\n", 1);
+diff --git a/ldap/servers/slapd/util.c b/ldap/servers/slapd/util.c
+index 649b3a9..0a9d23d 100644
+--- a/ldap/servers/slapd/util.c
++++ b/ldap/servers/slapd/util.c
+@@ -417,7 +417,7 @@ normalize_mods2bvals(const LDAPMod **mods)
+                 num_values++;
+             }
+         } else {
+-            for (x = 0; mods[w]->mod_values[x] != NULL &&
++            for (x = 0; mods[w]->mod_values != NULL &&
+                     mods[w]->mod_values[x] != NULL; x++) 
+             {
+                 num_values++;
+-- 
+1.8.1.4
+

@@ -1,0 +1,63 @@
+From 05caea1545fa3eaee25e719a2ecef0d97b9e7f38 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 11 Aug 2015 10:23:21 -0700
+Subject: [PATCH 348/363] Ticket #48245 - Man pages and help for remove-ds.pl
+ doesn't display "-a" option
+
+Description: Adding the description for "-a" to the man page and the help usage.
+
+https://fedorahosted.org/389/ticket/48245
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+
+(cherry picked from commit a2dbb56ec5ad468972a41a500e1cdbb4ced01cb0)
+(cherry picked from commit 06dafdfed1528ea6724f61492f4c93977a3ce809)
+(cherry picked from commit b482c9fa2e4dc0d2280675a95e0a71af052f4fd8)
+(cherry picked from commit 992541f1cadeed0a3e87ef7b2728429939b841ff)
+---
+ ldap/admin/src/scripts/remove-ds.pl.in | 5 +++--
+ man/man8/remove-ds.pl.8                | 5 ++++-
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/admin/src/scripts/remove-ds.pl.in b/ldap/admin/src/scripts/remove-ds.pl.in
+index 5f42615..0e7dd0d 100755
+--- a/ldap/admin/src/scripts/remove-ds.pl.in
++++ b/ldap/admin/src/scripts/remove-ds.pl.in
+@@ -34,8 +34,9 @@ Getopt::Long::Configure(qw(bundling)); # bundling allows -ddddd
+ my $res = new Resource("@propertydir@/setup-ds.res");
+ 
+ sub usage {
+-        print(STDERR "Usage: $0 [-f] [-d -d ... -d] -i instance\n\n");
+-        print(STDERR " Opts: -f            - force removal\n");
++        print(STDERR "Usage: $0 [-a] [-f] [-d -d ... -d] -i instance\n\n");
++        print(STDERR " Opts: -a            - remove all\n");
++        print(STDERR "       -f            - force removal\n");
+         print(STDERR "       -i instance   - instance name to remove (e.g. - slapd-example)\n");
+         print(STDERR "       -d            - turn on debugging output\n");
+ }
+diff --git a/man/man8/remove-ds.pl.8 b/man/man8/remove-ds.pl.8
+index 3bcf1e0..bb38c46 100644
+--- a/man/man8/remove-ds.pl.8
++++ b/man/man8/remove-ds.pl.8
+@@ -19,7 +19,7 @@
+ remove\-ds.pl \- Remove an instance of Directory Server
+ .SH SYNOPSIS
+ .B remove-ds.pl
+-[\-f] [\-d \-d ... \-d] \-i \fIinstance\fR
++[\-a] [\-f] [\-d \-d ... \-d] \-i \fIinstance\fR
+ .SH DESCRIPTION
+ Removes a Directory Server instance from the system.  The instance
+ will be shutdown and the files will be removed.  The certificate
+@@ -33,6 +33,9 @@ will contain the retained certificate database files.
+ .SH OPTIONS
+ A summary of options is included below:
+ .TP
++.B \fB\-a\fR
++Removes all files and directories belonging to the instance
++.TP
+ .B \fB\-f\fR
+ Force removal
+ .TP
+-- 
+2.4.3
+

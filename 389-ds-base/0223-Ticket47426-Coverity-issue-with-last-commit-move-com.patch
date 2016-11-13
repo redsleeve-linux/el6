@@ -1,0 +1,35 @@
+From e4c39bc3dcdd3b73544ba011677a42ce35ae3f4c Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Thu, 1 Aug 2013 15:05:16 -0400
+Subject: [PATCH 223/225] Ticket47426 - Coverity issue with last commit(move
+ compute_idletimeout out of handle_pr_read_ready)
+
+I had added a NULL check trying to avoid a coverity error, but pb->pb_conn can not be
+NULL when it gets to this code.  Removed NULL check.
+
+https://fedorahosted.org/389/ticket/47426
+
+Reviewed by: ?
+(cherry picked from commit a4daf1a0a65f796878b40b8ebc572082a1101f3b)
+(cherry picked from commit 89b78da25aa79101d6b43529a7486c64feb5eda6)
+(cherry picked from commit a184bbb92e59105ca196d793b87541c656081e12)
+---
+ ldap/servers/slapd/connection.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/connection.c b/ldap/servers/slapd/connection.c
+index 7aea493..c2ec4a7 100644
+--- a/ldap/servers/slapd/connection.c
++++ b/ldap/servers/slapd/connection.c
+@@ -2210,7 +2210,7 @@ connection_threadmain()
+ 					   in connection_activity when the conn is added to the
+ 					   work queue, setup_pr_read_pds won't add the connection prfd
+ 					   to the poll list */
+-					if(pb->pb_conn && pb->pb_conn->c_opscompleted == 0){
++					if(pb->pb_conn->c_opscompleted == 0){
+ 						/*
+ 						 * We have a new connection, set the anonymous reslimit idletimeout
+ 						 * if applicable.
+-- 
+1.8.1.4
+

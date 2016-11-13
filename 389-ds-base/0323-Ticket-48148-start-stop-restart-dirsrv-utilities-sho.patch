@@ -1,0 +1,91 @@
+From 41e0e84398114f6d86e91e1e3354bf4f2d5667c4 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Thu, 7 May 2015 15:42:18 -0700
+Subject: [PATCH 323/323] Ticket #48148 - start/stop/restart-dirsrv utilities
+ should ignore admin-serv directory
+
+Description:
+1) The script restart-dirsrv also needed to skip /etc/sysconfig/dirsrv-admin.
+   This patch silently skips "dirsrv-admin" for restarting dirsrv, as well.
+
+2) If the non-root user runs start/stop/restart-dirsrv, it checks ~/.dirsrv
+   to look for the dirsrv-* file.  If the directory is empty, it accidentally
+   picks up a file name from the current directory, which is not right.
+
+   This patch checks the /etc/sysconfig or ~/.dirsrv directory whether the
+   dirsrv-* file exists or not.  If it does not, the scripts just exit with
+   SUCCESS (== 0).
+
+https://fedorahosted.org/389/ticket/48148
+
+Reviewed and commentted by rmeggins@redhat.com (Thank you, Rich!!)
+
+(cherry picked from commit 070037a3f9ac880c5c38e38419ad23bf4209eb47)
+---
+ ldap/admin/src/scripts/restart-dirsrv.in | 15 +++++++++++----
+ ldap/admin/src/scripts/start-dirsrv.in   |  1 +
+ ldap/admin/src/scripts/stop-dirsrv.in    |  1 +
+ 3 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/ldap/admin/src/scripts/restart-dirsrv.in b/ldap/admin/src/scripts/restart-dirsrv.in
+index 76fb176..79fc1b1 100644
+--- a/ldap/admin/src/scripts/restart-dirsrv.in
++++ b/ldap/admin/src/scripts/restart-dirsrv.in
+@@ -10,6 +10,10 @@
+ restart_instance() {
+     SERV_ID=$1
+ 
++    if [ $SERV_ID == "admin" ]; then
++        #ignore admin
++        return 0
++    fi
+     server_already_stopped=0
+     @sbindir@/stop-dirsrv -d $initconfig_dir $SERV_ID
+     status=$?
+@@ -48,12 +52,15 @@ if [ "$#" -eq 0 ]; then
+     # We're restarting all instances.
+     ret=0
+     for i in $initconfig_dir/@package_name@-*; do
++        if [ ! -f "$i" ] ; then break ; fi
+         regex=s,$initconfig_dir/@package_name@-,,g
+         inst=`echo $i | sed -e $regex`
+-        echo Restarting instance \"$inst\"
+-        restart_instance $inst
+-        if [ "$?" -ne 0 ]; then
+-            ret=$?
++        if [ $inst != "admin" ]; then
++            echo Restarting instance \"$inst\"
++            restart_instance $inst
++            if [ "$?" -ne 0 ]; then
++                ret=$?
++            fi
+         fi
+     done
+     exit $ret
+diff --git a/ldap/admin/src/scripts/start-dirsrv.in b/ldap/admin/src/scripts/start-dirsrv.in
+index 0a38c4c..4e36939 100755
+--- a/ldap/admin/src/scripts/start-dirsrv.in
++++ b/ldap/admin/src/scripts/start-dirsrv.in
+@@ -129,6 +129,7 @@ if [ "$#" -eq 0 ]; then
+     # We're starting all instances.
+     ret=0
+     for i in $initconfig_dir/@package_name@-*; do
++        if [ ! -f "$i" ] ; then break ; fi
+         regex=s,$initconfig_dir/@package_name@-,,g
+         inst=`echo $i | sed -e $regex`
+         start_instance $inst
+diff --git a/ldap/admin/src/scripts/stop-dirsrv.in b/ldap/admin/src/scripts/stop-dirsrv.in
+index 076af87..15a84a4 100755
+--- a/ldap/admin/src/scripts/stop-dirsrv.in
++++ b/ldap/admin/src/scripts/stop-dirsrv.in
+@@ -77,6 +77,7 @@ if [ "$#" -eq 0 ]; then
+     # We're stopping all instances.
+     ret=0
+     for i in $initconfig_dir/@package_name@-*; do
++        if [ ! -f "$i" ] ; then break ; fi
+         regex=s,$initconfig_dir/@package_name@-,,g
+         inst=`echo $i | sed -e $regex`
+         stop_instance $inst
+-- 
+1.9.3
+

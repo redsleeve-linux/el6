@@ -1,0 +1,286 @@
+From e14789eed0ef35b8c469909ad7c15c7909cf5bd6 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 7 Feb 2014 16:39:52 -0800
+Subject: [PATCH 161/225] Ticket #47693 - Environment variables are not passed
+ when DS is started via service
+
+Description: Environment variables (except TERM and LANG) are ignored
+if a program is started via service.
+
+If it is started with systemctl, it takes this COMMAND and the values
+are correctly passed to the server.
+systemctl set-environment SLAPD_MXFAST=0 MALLOC_TRIM_THRESHOLD_=4096
+
+To control them explicitly and to provide the same instructions to
+the service and systemctl, it'd be good to have some variables
+(SLAPD_MXFAST, MALLOC_TRIM_THRESHOLD_ and MALLOC_MMAP_THRESHOLD_ in
+this patch) configurable.
+
+https://fedorahosted.org/389/ticket/47693
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+(cherry picked from commit 02169effb14ea082cdfed5377244b4ffedb7c437)
+(cherry picked from commit 476a1930ab5cbe2fbee9f94586c000980089ebf2)
+(cherry picked from commit ae2e7f4d277a608e8c2a893f15eb9b4c397284cc)
+(cherry picked from commit 57199b34c9cbe4a703e537633fbe6beab9a94e81)
+---
+ ldap/servers/slapd/libglobs.c   | 161 ++++++++++++++++++++++++++++++++++++++++
+ ldap/servers/slapd/proto-slap.h |  11 +++
+ ldap/servers/slapd/slap.h       |  12 +++
+ 3 files changed, 184 insertions(+)
+
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index 8352fc7..903d38b 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -81,6 +81,9 @@
+ #endif /* USE_SYSCONF */
+ #include "slap.h"
+ #include "plhash.h"
++#if defined(LINUX)
++#include <malloc.h>
++#endif
+ 
+ #define REMOVE_CHANGELOG_CMD "remove"
+ #define DEFAULT_SASL_MAXBUFSIZE "65536"
+@@ -700,6 +703,20 @@ static struct config_get_and_set {
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.listen_backlog_size, CONFIG_INT,
+ 		(ConfigGetFunc)config_get_listen_backlog_size},
++#if defined(LINUX)
++	{CONFIG_MALLOC_MXFAST, config_set_malloc_mxfast,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.malloc_mxfast,
++		CONFIG_INT, (ConfigGetFunc)config_get_malloc_mxfast},
++	{CONFIG_MALLOC_TRIM_THRESHOLD, config_set_malloc_trim_threshold,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.malloc_trim_threshold,
++		CONFIG_INT, (ConfigGetFunc)config_get_malloc_trim_threshold},
++	{CONFIG_MALLOC_MMAP_THRESHOLD, config_set_malloc_mmap_threshold,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.malloc_mmap_threshold,
++		CONFIG_INT, (ConfigGetFunc)config_get_malloc_mmap_threshold},
++#endif
+ 	{CONFIG_IGNORE_TIME_SKEW, config_set_ignore_time_skew,
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.ignore_time_skew,
+@@ -1108,6 +1125,12 @@ FrontendConfig_init () {
+ 
+   cfg->listen_backlog_size = DAEMON_LISTEN_SIZE;
+   cfg->ignore_time_skew = LDAP_OFF;
++#if defined(LINUX)
++  cfg->malloc_mxfast = DEFAULT_MALLOC_UNSET;
++  cfg->malloc_trim_threshold = DEFAULT_MALLOC_UNSET;
++  cfg->malloc_mmap_threshold = DEFAULT_MALLOC_UNSET;
++#endif
++
+ #ifdef MEMPOOL_EXPERIMENTAL
+   cfg->mempool_switch = LDAP_ON;
+   cfg->mempool_maxfreelist = 1024;
+@@ -6633,6 +6656,144 @@ config_set_auditlog_enabled(int value){
+     CFG_UNLOCK_WRITE(slapdFrontendConfig);
+ }
+ 
++#if defined(LINUX)
++int
++config_set_malloc_mxfast(const char *attrname, char *value, char *errorbuf, int apply)
++{
++    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++    int max = 80 * (sizeof(size_t) / 4);
++    int mxfast;
++    char *endp = NULL;
++
++    if (config_value_is_null(attrname, value, errorbuf, 0)) {
++        return LDAP_OPERATIONS_ERROR;
++    }
++    errno = 0;
++    mxfast = strtol(value, &endp, 10);
++    if ((*endp != '\0') || (errno == ERANGE)) {
++        PR_snprintf(errorbuf, SLAPI_DSE_RETURNTEXT_SIZE,
++                    "limit \"%s\" is invalid, %s must range from 0 to %d",
++                    value, CONFIG_MALLOC_MXFAST, max);
++        return LDAP_OPERATIONS_ERROR;
++    }
++    CFG_ONOFF_LOCK_WRITE(slapdFrontendConfig);
++    slapdFrontendConfig->malloc_mxfast = mxfast;
++    CFG_ONOFF_UNLOCK_WRITE(slapdFrontendConfig);
++
++    if ((mxfast >= 0) && (mxfast <= max)) {
++        mallopt(M_MXFAST, mxfast);
++    } else if (DEFAULT_MALLOC_UNSET != mxfast) {
++        slapi_log_error(SLAPI_LOG_FATAL, "config",
++                        "%s: Invalid value %d will be ignored\n",
++                        CONFIG_MALLOC_MXFAST, mxfast);
++    }
++    return LDAP_SUCCESS;
++}
++
++int
++config_get_malloc_mxfast()
++{
++  slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++  int retVal;
++
++  retVal = slapdFrontendConfig->malloc_mxfast;
++  return retVal; 
++}
++
++int
++config_set_malloc_trim_threshold(const char *attrname, char *value, char *errorbuf, int apply)
++{
++    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++    int trim_threshold;
++    char *endp = NULL;
++
++    if (config_value_is_null(attrname, value, errorbuf, 0)) {
++        return LDAP_OPERATIONS_ERROR;
++    }
++    errno = 0;
++    trim_threshold = strtol(value, &endp, 10);
++    if ((*endp != '\0') || (errno == ERANGE)) {
++        PR_snprintf(errorbuf, SLAPI_DSE_RETURNTEXT_SIZE,
++                    "limit \"%s\" is invalid, %s must range from 0 to %lld",
++                    value, CONFIG_MALLOC_TRIM_THRESHOLD, (long long int)LONG_MAX);
++        return LDAP_OPERATIONS_ERROR;
++    }
++
++    CFG_ONOFF_LOCK_WRITE(slapdFrontendConfig);
++    slapdFrontendConfig->malloc_trim_threshold = trim_threshold;
++    CFG_ONOFF_UNLOCK_WRITE(slapdFrontendConfig);
++
++    if (trim_threshold >= -1) {
++        mallopt(M_TRIM_THRESHOLD, trim_threshold);
++    } else if (DEFAULT_MALLOC_UNSET != trim_threshold) {
++        slapi_log_error(SLAPI_LOG_FATAL, "config",
++                        "%s: Invalid value %d will be ignored\n",
++                        CONFIG_MALLOC_TRIM_THRESHOLD, trim_threshold);
++    }
++    return LDAP_SUCCESS;
++}
++
++int
++config_get_malloc_trim_threshold()
++{
++  slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++  int retVal;
++
++  retVal = slapdFrontendConfig->malloc_trim_threshold;
++  return retVal; 
++}
++
++int
++config_set_malloc_mmap_threshold(const char *attrname, char *value, char *errorbuf, int apply)
++{
++    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++    int max;
++    int mmap_threshold;
++    char *endp = NULL;
++
++    if (config_value_is_null(attrname, value, errorbuf, 0)) {
++        return LDAP_OPERATIONS_ERROR;
++    }
++    if (sizeof(char *) == 8) {
++        max = 33554432; /* 4*1024*1024*sizeof(long) on 64-bit systems */
++    } else {
++        max = 524288; /* 512*1024 on 32-bit systems */
++    }
++
++    errno = 0;
++    mmap_threshold = strtol(value, &endp, 10);
++    if ((*endp != '\0') || (errno == ERANGE)) {
++        PR_snprintf(errorbuf, SLAPI_DSE_RETURNTEXT_SIZE,
++                    "limit \"%s\" is invalid, %s must range from 0 to %d",
++                    value, CONFIG_MALLOC_MMAP_THRESHOLD, max);
++        return LDAP_OPERATIONS_ERROR;
++    }
++
++    CFG_ONOFF_LOCK_WRITE(slapdFrontendConfig);
++    slapdFrontendConfig->malloc_mmap_threshold = mmap_threshold;
++    CFG_ONOFF_UNLOCK_WRITE(slapdFrontendConfig);
++
++    if ((mmap_threshold >= 0) && (mmap_threshold <= max)) {
++        mallopt(M_MMAP_THRESHOLD, mmap_threshold);
++    } else if (DEFAULT_MALLOC_UNSET != mmap_threshold) {
++        slapi_log_error(SLAPI_LOG_FATAL, "config",
++                        "%s: Invalid value %d will be ignored\n",
++                        CONFIG_MALLOC_MMAP_THRESHOLD, mmap_threshold);
++    }
++    return LDAP_SUCCESS;
++}
++
++int
++config_get_malloc_mmap_threshold()
++{
++  slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++  int retVal;
++
++  retVal = slapdFrontendConfig->malloc_mmap_threshold;
++  return retVal; 
++}
++#endif
++
+ char *
+ slapi_err2string(int result)
+ {
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 71a912e..7a20bdf 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -394,6 +394,11 @@ int config_set_auditlog_unhashed_pw(const char *attrname, char *value, char *err
+ int config_set_sasl_maxbufsize(const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_listen_backlog_size(const char *attrname, char *value, char *errorbuf, int apply);
+ int config_set_ignore_time_skew(const char *attrname, char *value, char *errorbuf, int apply);
++#if defined(LINUX)
++int config_set_malloc_mxfast(const char *attrname, char *value, char *errorbuf, int apply);
++int config_set_malloc_trim_threshold(const char *attrname, char *value, char *errorbuf, int apply);
++int config_set_malloc_mmap_threshold(const char *attrname, char *value, char *errorbuf, int apply);
++#endif
+ 
+ #if !defined(_WIN32) && !defined(AIX)
+ int config_set_maxdescriptors( const char *attrname, char *value, char *errorbuf, int apply );
+@@ -552,6 +557,12 @@ int config_get_sasl_maxbufsize();
+ int config_get_listen_backlog_size(void);
+ int config_get_ignore_time_skew();
+ 
++#if defined(LINUX)
++int config_get_malloc_mxfast();
++int config_get_malloc_trim_threshold();
++int config_get_malloc_mmap_threshold();
++#endif
++
+ int is_abspath(const char *);
+ char* rel2abspath( char * );
+ char* rel2abspath_ext( char *, char * );
+diff --git a/ldap/servers/slapd/slap.h b/ldap/servers/slapd/slap.h
+index 5394455..9a05da9 100644
+--- a/ldap/servers/slapd/slap.h
++++ b/ldap/servers/slapd/slap.h
+@@ -2008,6 +2008,13 @@ typedef struct _slapdEntryPoints {
+ #define CONFIG_LISTEN_BACKLOG_SIZE	"nsslapd-listen-backlog-size"
+ #define CONFIG_IGNORE_TIME_SKEW "nsslapd-ignore-time-skew"
+ 
++/* getenv alternative */
++#define CONFIG_MALLOC_MXFAST "nsslapd-malloc-mxfast"
++#define CONFIG_MALLOC_TRIM_THRESHOLD "nsslapd-malloc-trim-threshold"
++#define CONFIG_MALLOC_MMAP_THRESHOLD "nsslapd-malloc-mmap-threshold"
++
++#define DEFAULT_MALLOC_UNSET (-10)
++
+ /*
+  * Define the backlog number for use in listen() call.
+  * We use the same definition as in ldapserver/include/base/systems.h
+@@ -2252,6 +2259,11 @@ typedef struct _slapdFrontendConfig {
+   int disk_grace_period;
+   int disk_logging_critical;
+   int ignore_time_skew;
++#if defined(LINUX)
++  int malloc_mxfast;            /* mallopt M_MXFAST */
++  int malloc_trim_threshold;    /* mallopt M_TRIM_THRESHOLD */
++  int malloc_mmap_threshold;    /* mallopt M_MMAP_THRESHOLD */
++#endif
+ } slapdFrontendConfig_t;
+ 
+ /* possible values for slapdFrontendConfig_t.schemareplace */
+-- 
+1.8.1.4
+

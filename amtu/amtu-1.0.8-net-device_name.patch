@@ -1,0 +1,52 @@
+Don't use sizeof(char *) to determine the length of a string, and convert
+the unnecessary use of strncmp() to regular strcmp().
+
+diff -purN amtu-1.0.8.orig/src/networkio.c amtu-1.0.8/src/networkio.c
+--- amtu-1.0.8.orig/src/networkio.c	2014-05-28 11:21:37.820552221 -0400
++++ amtu-1.0.8/src/networkio.c	2014-05-30 09:07:50.991278550 -0400
+@@ -271,8 +271,7 @@ int get_interfaces()
+  		 */
+  		 
+ 		for (i = 0; i < j; i++) {
+-			if (strncmp(interface_list[i]->ifname, ifa->ifa_name, 
+-			    sizeof(ifa->ifa_name)) == 0) {
++			if (strcmp(interface_list[i]->ifname, ifa->ifa_name) == 0) {
+ 				found = 1;
+ 				break;
+ 			}
+@@ -293,21 +292,18 @@ int get_interfaces()
+ 			}	 
+ 	
+ 			np->ifindex = if_nametoindex(ifa->ifa_name);
+-			/* need to malloc size of string plus null terminator */
+-			np->ifname = (char *)malloc(sizeof(ifa->ifa_name) + 1);
++			np->ifname = strdup(ifa->ifa_name);
+ 			if (np->ifname == NULL) {
+-				fprintf(stderr,"get_interfaces:malloc np->ifname failed\n");
++				fprintf(stderr,"get_interfaces:strdup np->ifname failed\n");
+ #ifdef HAVE_LIBLAUS
+-				LAUS_LOG(("amtu failed network I/O test in malloc np->ifname"));
++				LAUS_LOG(("amtu failed network I/O test in strdup np->ifname"));
+ #else
+-				AUDIT_LOG("amtu failed network I/O test in malloc np->ifname", 0);
++				AUDIT_LOG("amtu failed network I/O test in strdup np->ifname", 0);
+ #endif
+ 				freeifaddrs(ifaddrs);
+ 				free(np);
+ 				return -1;	
+ 			}
+-			memset(np->ifname, 0, sizeof(ifa->ifa_name) + 1);
+-			strncpy(np->ifname, ifa->ifa_name, sizeof(ifa->ifa_name));
+ 			interface_list[j++] = np;
+ 		}
+ 	}                                                         
+@@ -324,8 +320,7 @@ int get_interfaces()
+ 	                     
+ 		for (ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next) {
+ 			if ((ifa->ifa_addr->sa_family == AF_PACKET) &&
+-			    strncmp(ifa->ifa_name, interface_list[i]->ifname, 
+-			     sizeof(ifa->ifa_name))) {
++			    strcmp(ifa->ifa_name, interface_list[i]->ifname)) {
+ 				/* found the link address, copy it. */
+ 				memcpy(interface_list[i]->lladdr, ifa->ifa_addr->sa_data, 14);
+ 				break;

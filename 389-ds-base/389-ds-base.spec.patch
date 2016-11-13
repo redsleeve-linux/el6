@@ -1,0 +1,11 @@
+--- 389-ds-base.spec	2016-08-29 16:30:10.433601342 +0000
++++ 389-ds-base.spec.patched	2016-08-29 16:47:13.072662183 +0000
+@@ -31,7 +31,7 @@
+ # for migration tools
+ Provides:         ldif2ldbm
+ 
+-ExclusiveArch:    x86_64 %{ix86}
++ExclusiveArch:    x86_64 %{ix86} %{arm}
+ BuildRequires:    nspr-devel
+ BuildRequires:    nss-devel
+ BuildRequires:    svrcore-devel

@@ -1,0 +1,53 @@
+From bcf43fb4346547f92f6d5748942bedf54307cc2e Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 30 Sep 2014 15:18:37 -0400
+Subject: [PATCH 270/305] Ticket 47900 - Adding an entry with an invalid
+ password as rootDN is incorrectly rejected
+
+Bug Description:  Root DN and password administrators should bypass all password
+                  restrictions and syntax checks, but on ADD operations the password
+                  checks were still be applied to root/password admins.
+
+Fix Description:  Do not check the password syntax if the bind DN is a rootDN/password admin.
+
+https://fedorahosted.org/389/ticket/47900
+
+Reviewed by: nhosoi(Thanks!)
+
+(cherry picked from commit 950390bb09512a033a25f40e4f61f7346321a19a)
+---
+ ldap/servers/slapd/add.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/add.c b/ldap/servers/slapd/add.c
+index 1ce975a..9b549c3 100644
+--- a/ldap/servers/slapd/add.c
++++ b/ldap/servers/slapd/add.c
+@@ -457,12 +457,14 @@ static void op_shared_add (Slapi_PBlock *pb)
+ 	int proxy_err = LDAP_SUCCESS;
+ 	char *errtext = NULL;
+ 	Slapi_DN *sdn = NULL;
++	passwdPolicy *pwpolicy;
+ 
+ 	slapi_pblock_get (pb, SLAPI_OPERATION, &operation);
+ 	slapi_pblock_get (pb, SLAPI_ADD_ENTRY, &e);
+ 	slapi_pblock_get (pb, SLAPI_IS_REPLICATED_OPERATION, &repl_op);	
+ 	slapi_pblock_get (pb, SLAPI_IS_LEGACY_REPLICATED_OPERATION, &legacy_op);
+ 	internal_op= operation_is_flag_set(operation, OP_FLAG_INTERNAL);
++	pwpolicy = new_passwdPolicy(pb, slapi_entry_get_dn(e));
+ 
+ 	/* target spec is used to decide which plugins are applicable for the operation */
+ 	operation_set_target_spec (operation, slapi_entry_get_sdn (e));
+@@ -559,7 +561,8 @@ static void op_shared_add (Slapi_PBlock *pb)
+ 			}
+ 
+ 			/* check password syntax */
+-			if (check_pw_syntax(pb, slapi_entry_get_sdn_const(e), present_values, NULL, e, 0) == 0)
++			if (!pw_is_pwp_admin(pb, pwpolicy) &&
++			    check_pw_syntax(pb, slapi_entry_get_sdn_const(e), present_values, NULL, e, 0) == 0)
+ 			{
+ 				Slapi_Value **vals= NULL;
+ 				valuearray_add_valuearray(&unhashed_password_vals, present_values, 0);
+-- 
+1.9.3
+

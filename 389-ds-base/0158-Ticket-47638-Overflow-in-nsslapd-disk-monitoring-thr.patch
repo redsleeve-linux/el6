@@ -1,0 +1,171 @@
+From fe06e62406826e17a190890c6818015085569243 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 21 Jan 2014 17:05:59 -0500
+Subject: [PATCH 158/225] Ticket 47638 - Overflow in
+ nsslapd-disk-monitoring-threshold on 32bit platform
+
+Bug Description:  On 32bit platforms 3000000000 overflows when retrieving the value
+                  from the dse.  The value was internally processed correctly, but
+                  the value returned to the client was incorrect.
+
+Fix Description:  Created a new CONFIG_LONG_LONG config value type, and the associated
+                  slapi_entry_attr_set_* function.
+
+https://fedorahosted.org/389/ticket/47638
+
+Reviewed by: rmeggins(Thanks!)
+(cherry picked from commit 75e760789f5b3fe03d5ee9e2f6433e7fb9a045f8)
+---
+ ldap/servers/slapd/daemon.c       |  2 +-
+ ldap/servers/slapd/entry.c        | 14 ++++++++++++++
+ ldap/servers/slapd/libglobs.c     | 16 ++++++++++++----
+ ldap/servers/slapd/proto-slap.h   |  2 +-
+ ldap/servers/slapd/slap.h         |  2 +-
+ ldap/servers/slapd/slapi-plugin.h | 10 ++++++++++
+ 6 files changed, 39 insertions(+), 7 deletions(-)
+
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index 524a6aa..18c0988 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -702,7 +702,7 @@ disk_monitoring_thread(void *nothing)
+     char *dirstr = NULL;
+     PRUint64 previous_mark = 0;
+     PRUint64 disk_space = 0;
+-    PRUint64 threshold = 0;
++    PRInt64 threshold = 0;
+     PRUint64 halfway = 0;
+     time_t start = 0;
+     time_t now = 0;
+diff --git a/ldap/servers/slapd/entry.c b/ldap/servers/slapd/entry.c
+index d7df631..d47e0f6 100644
+--- a/ldap/servers/slapd/entry.c
++++ b/ldap/servers/slapd/entry.c
+@@ -2915,6 +2915,20 @@ slapi_entry_attr_set_long( Slapi_Entry* e, const char *type, long l)
+ }
+ 
+ void
++slapi_entry_attr_set_longlong( Slapi_Entry* e, const char *type, long long l)
++{
++    char value[20];
++    struct berval bv;
++    struct berval *bvals[2];
++    bvals[0] = &bv;
++    bvals[1] = NULL;
++    sprintf(value,"%lld",l);
++    bv.bv_val = value;
++    bv.bv_len = strlen( value );
++    slapi_entry_attr_replace( e, type, bvals );
++}
++
++void
+ slapi_entry_attr_set_ulong( Slapi_Entry* e, const char *type, unsigned long l)
+ {
+     char value[16];
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index 0fc9022..8352fc7 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -85,6 +85,7 @@
+ #define REMOVE_CHANGELOG_CMD "remove"
+ #define DEFAULT_SASL_MAXBUFSIZE "65536"
+ #define SLAPD_DEFAULT_SASL_MAXBUFSIZE 65536
++#define DEFAULT_DISK_THRESHOLD "2097152"
+ 
+ /* On UNIX, there's only one copy of slapd_ldap_debug */
+ /* On NT, each module keeps its own module_ldap_debug, which */
+@@ -107,6 +108,7 @@ typedef int (*LogSetFunc)(const char *attrname, char *value, int whichlog,
+ typedef enum {
+ 	CONFIG_INT, /* maps to int */
+ 	CONFIG_LONG, /* maps to long */
++	CONFIG_LONG_LONG, /* maps to a long long (PRInt64) */
+ 	CONFIG_STRING, /* maps to char* */
+ 	CONFIG_CHARRAY, /* maps to char** */
+ 	CONFIG_ON_OFF, /* maps 0/1 to "off"/"on" */
+@@ -680,7 +682,8 @@ static struct config_get_and_set {
+ 	{CONFIG_DISK_THRESHOLD, config_set_disk_threshold,
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.disk_threshold,
+-		CONFIG_LONG, (ConfigGetFunc)config_get_disk_threshold},
++		CONFIG_LONG_LONG, (ConfigGetFunc)config_get_disk_threshold,
++		DEFAULT_DISK_THRESHOLD},
+ 	{CONFIG_DISK_GRACE_PERIOD, config_set_disk_grace_period,
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.disk_grace_period,
+@@ -3804,10 +3807,10 @@ config_get_disk_grace_period(){
+     return retVal;
+ }
+ 
+-PRUint64
++PRInt64
+ config_get_disk_threshold(){
+     slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+-    long retVal;
++    PRInt64 retVal;
+ 
+     CFG_LOCK_READ(slapdFrontendConfig);
+     retVal = slapdFrontendConfig->disk_threshold;
+@@ -6357,7 +6360,12 @@ config_set_value(
+         else
+             slapi_entry_attr_set_charptr(e, cgas->attr_name, "");
+         break;
+-
++    case CONFIG_LONG_LONG:
++        if (value)
++            slapi_entry_attr_set_longlong(e, cgas->attr_name, *((long long*)value));
++        else
++            slapi_entry_attr_set_charptr(e, cgas->attr_name, "");
++        break;
+     case CONFIG_STRING:
+         slapi_entry_attr_set_charptr(e, cgas->attr_name,
+                                      (value && *((char **)value)) ?
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 233dc20..71a912e 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -545,7 +545,7 @@ void config_set_accesslog_enabled(int value);
+ void config_set_auditlog_enabled(int value);
+ int config_get_accesslog_logging_enabled();
+ int config_get_disk_monitoring();
+-PRUint64 config_get_disk_threshold();
++PRInt64 config_get_disk_threshold();
+ int config_get_disk_grace_period();
+ int config_get_disk_logging_critical();
+ int config_get_sasl_maxbufsize();
+diff --git a/ldap/servers/slapd/slap.h b/ldap/servers/slapd/slap.h
+index 4724f27..5394455 100644
+--- a/ldap/servers/slapd/slap.h
++++ b/ldap/servers/slapd/slap.h
+@@ -2248,7 +2248,7 @@ typedef struct _slapdFrontendConfig {
+ 
+   /* disk monitoring */
+   int disk_monitoring;
+-  PRUint64 disk_threshold;
++  PRInt64 disk_threshold;
+   int disk_grace_period;
+   int disk_logging_critical;
+   int ignore_time_skew;
+diff --git a/ldap/servers/slapd/slapi-plugin.h b/ldap/servers/slapd/slapi-plugin.h
+index 58feaf3..a23b641 100644
+--- a/ldap/servers/slapd/slapi-plugin.h
++++ b/ldap/servers/slapd/slapi-plugin.h
+@@ -1784,6 +1784,16 @@ void slapi_entry_attr_set_uint( Slapi_Entry* e, const char *type, unsigned int l
+ void slapi_entry_attr_set_long(Slapi_Entry* e, const char *type, long l);
+ 
+ /**
++ * Replaces the value or values of an attribute in an entry with a specified long long
++ * data type value.
++ *
++ * \param e Entry in which you want to set the value.
++ * \param type Attribute type in which you want to set the value.
++ * \param l Long Long integer value that you want to assign to the attribute.
++ */
++void slapi_entry_attr_set_longlong( Slapi_Entry* e, const char *type, long long l);
++
++/**
+  * Replaces the value or values of an attribute in an entry with a specified unsigned
+  * long data type value.
+  *
+-- 
+1.8.1.4
+

@@ -1,0 +1,63 @@
+From 702f9f9f036bdef2535fcce4ea108b2d9ce09a19 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 13 Mar 2015 17:56:43 -0700
+Subject: [PATCH 307/308] Ticket #48133 - Non tombstone entry which dn starting
+ with "nsuniqueid=...," cannot be deleted
+
+Bug Description: Trying to delete an entry which DN starts with
+"nsuniqueid=...," but no objectclass=nsTombstone fails with
+"Turning a tombstone into a tombstone!", which is indeed not.
+
+Fix Description: This patch checks the entry and if it does not
+have "objectclass=nsTombstone", the entry is not treated as a
+tombstone.  Also, if the DN already has the entry's nsuniqueid
+at the beginning, it does not get appended to avoid the duplicate.
+
+Note: Adding an entry which DN starts with "nsuniqueid" and no
+nsTombstone objectclass fails since such an entry is rejected in
+check_rdn_for_created_attrs called from do_add.
+
+https://fedorahosted.org/389/ticket/48133
+(cherry picked from commit 3579393628d9f256613e20d4b1ec248ea3feee2e)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_delete.c | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_delete.c b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+index 48058d6..a03915c 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_delete.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+@@ -454,13 +454,28 @@ ldbm_back_delete( Slapi_PBlock *pb )
+ 		char *tombstone_dn;
+ 		Slapi_Value *tomb_value;
+ 
+-		if (slapi_is_special_rdn(edn, RDN_IS_TOMBSTONE)) {
++		if (slapi_entry_attr_hasvalue(e->ep_entry, SLAPI_ATTR_OBJECTCLASS, SLAPI_ATTR_VALUE_TOMBSTONE) &&
++		    slapi_is_special_rdn(edn, RDN_IS_TOMBSTONE)) {
+ 			LDAPDebug1Arg(LDAP_DEBUG_ANY, "Turning a tombstone into a tombstone! \"%s\"\n", edn);
+ 			ldap_result_code= LDAP_OPERATIONS_ERROR;
+ 			retval = -1;
+ 			goto error_return;
+ 		}
+-		tombstone_dn = compute_entry_tombstone_dn(edn, childuniqueid);
++		if (!childuniqueid) {
++			slapi_log_error(SLAPI_LOG_FATAL, "ldbm_back_delete",
++			                "No nsUniqueId in the entry \"%s\"; e: 0x%p, cache_state: 0x%x, refcnt: %d\n", 
++			                edn, e, e->ep_state, e->ep_refcnt);
++			ldap_result_code = LDAP_OPERATIONS_ERROR;
++			retval = -1;
++			goto error_return;
++		}
++		if ((0 == PL_strncmp(edn + sizeof(SLAPI_ATTR_UNIQUEID), childuniqueid, strlen(childuniqueid))) &&
++			(*(edn + SLAPI_ATTR_UNIQUEID_LENGTH + slapi_uniqueIDSize() + 1/*=*/) == ',')) {
++			/* The DN already starts with "nsuniqueid=...," */
++			tombstone_dn = slapi_ch_strdup(edn);
++		} else {
++			tombstone_dn = compute_entry_tombstone_dn(edn, childuniqueid);
++		}
+ 
+ 		slapi_sdn_set_ndn_byval(&nscpEntrySDN, slapi_sdn_get_ndn(slapi_entry_get_sdn(e->ep_entry)));
+ 
+-- 
+1.9.3
+

@@ -1,0 +1,46 @@
+From d0a528cb40223f72e6d4f0ee64c4a86eb19a0bcc Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Mon, 5 Oct 2015 13:46:47 -0700
+Subject: [PATCH] Ticket #48266 - (1.2.11 only) Fractional replication
+ evaluates several times the same CSN
+
+Description: Regression introdced by commit 1a58bf85389fc4373af2bf07e96eeb4618cee2b7.
+The patch expected replica_object was set in prp_total, which was missing
+in 1.2.11.  This patch sets it to prp_total in Repl_5_Tot_Protocol_new.
+
+Note: replica_object in prp_total is set in the newer version (1.3.1 and
+newer) by Ticket 47620.
+
+Tested on rhel-6 following the reproducer:
+on ipa master:
+ ipa-server-install -p PW -a PW -r DOMAIN -n domainname --ip-address=IP -U
+ ipa-replica-prepare -p PW REPLICA_FQDN
+ scp /var/lib/ipa/replica-info-REPLICA_FQDN.gpg REPLICA:/var/lib/ipa
+on ipa replica:
+  ipa-replica-install /var/lib/ipa/replica-info-REPLICA_FQDN.gpg -p PW -w PW --ip-address=IP
+Without the patch, the DS on master crashed.
+
+https://fedorahosted.org/389/ticket/48266
+
+Reviewed by tbordaz@redhat.com (Thank you, Thierry!!)
+
+(cherry picked from commit 1e7e99d60227276dac6ca78ba519a4a237999b7a)
+---
+ ldap/servers/plugins/replication/repl5_tot_protocol.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/ldap/servers/plugins/replication/repl5_tot_protocol.c b/ldap/servers/plugins/replication/repl5_tot_protocol.c
+index 0143e19..1bc987c 100644
+--- a/ldap/servers/plugins/replication/repl5_tot_protocol.c
++++ b/ldap/servers/plugins/replication/repl5_tot_protocol.c
+@@ -613,6 +613,7 @@ Repl_5_Tot_Protocol_new(Repl_Protocol *rp)
+ 	prp->repl50consumer = 0;
+ 	prp->repl71consumer = 0;
+ 	prp->repl90consumer = 0;
++	prp->replica_object = prot_get_replica_object(rp);
+ 	return prp;
+ loser:
+ 	repl5_tot_delete(&prp);
+-- 
+1.9.3
+

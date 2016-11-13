@@ -1,0 +1,57 @@
+From 8901408e45c35dafa18b843b9db2f3114dd12b63 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Sun, 17 Aug 2014 15:10:16 -0700
+Subject: [PATCH 248/251] Trac Ticket #443 - Deleting attribute present in
+ nsslapd-allowed-to-delete-attrs returns Operations error
+
+Description: Backporting the patch to 1.2.11 branch by commit
+9cc7fade0b5440479b39ddbcb989e5ed220b267f accidentally removed
+5 config parameters from the table:
+  CONFIG_LISTEN_BACKLOG_SIZE, CONFIG_MALLOC_MXFAST,
+  CONFIG_MALLOC_TRIM_THRESHOLD, CONFIG_MALLOC_MMAP_THRESHOLD,
+  CONFIG_IGNORE_TIME_SKEW
+Resurrecting them.
+(cherry picked from commit 06dfa1df69ebba9c71471d6e0de42ee09824302f)
+---
+ ldap/servers/slapd/libglobs.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index 5eda0f8..ad02a00 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -1008,6 +1008,31 @@ static struct config_get_and_set {
+ 		(void**)&global_slapdFrontendConfig.sasl_max_bufsize,
+ 		CONFIG_INT, (ConfigGetFunc)config_get_sasl_maxbufsize,
+ 		DEFAULT_SASL_MAXBUFSIZE},
++	{CONFIG_LISTEN_BACKLOG_SIZE, config_set_listen_backlog_size,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.listen_backlog_size, CONFIG_INT,
++		(ConfigGetFunc)config_get_listen_backlog_size, &init_listen_backlog_size},
++#if defined(LINUX)
++	{CONFIG_MALLOC_MXFAST, config_set_malloc_mxfast,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.malloc_mxfast,
++		CONFIG_INT, (ConfigGetFunc)config_get_malloc_mxfast,
++		&init_malloc_mxfast},
++	{CONFIG_MALLOC_TRIM_THRESHOLD, config_set_malloc_trim_threshold,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.malloc_trim_threshold,
++		CONFIG_INT, (ConfigGetFunc)config_get_malloc_trim_threshold,
++		&init_malloc_trim_threshold},
++	{CONFIG_MALLOC_MMAP_THRESHOLD, config_set_malloc_mmap_threshold,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.malloc_mmap_threshold,
++		CONFIG_INT, (ConfigGetFunc)config_get_malloc_mmap_threshold,
++		&init_malloc_mmap_threshold},
++#endif
++	{CONFIG_IGNORE_TIME_SKEW, config_set_ignore_time_skew,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.ignore_time_skew,
++		CONFIG_ON_OFF, (ConfigGetFunc)config_get_ignore_time_skew, &init_ignore_time_skew}
+ #ifdef MEMPOOL_EXPERIMENTAL
+ 	,{CONFIG_MEMPOOL_SWITCH_ATTRIBUTE, config_set_mempool_switch,
+ 		NULL, 0,
+-- 
+1.8.1.4
+

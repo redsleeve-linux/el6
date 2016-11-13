@@ -1,0 +1,67 @@
+From 3256d3368f8f68bb37a93e15a3c451f2229b6364 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Sat, 11 Apr 2015 23:34:30 -0700
+Subject: [PATCH 313/319] Ticket #47928 - Disable SSL v3, by default
+ [389-ds-base-1.2.11 only]
+
+Description: commit 17fc03cf1101135b99234f17efd3eb746626be1a introduced a
+defect "bz 1210996 - TLS1 can't be turned off".  This patch correctly sets
+SSLv3 to minimum and maximum version if nsTLS1 is off.  If both nsSSL3 and
+nsTLS1 is off, it forces to enable nsTLS1 and log it in the error log.
+
+(cherry picked from commit f0d0930540bf41e5551fb629f18c35edcd67acfd)
+---
+ ldap/servers/slapd/ssl.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/slapd/ssl.c b/ldap/servers/slapd/ssl.c
+index c30ebd6..5451d6e 100644
+--- a/ldap/servers/slapd/ssl.c
++++ b/ldap/servers/slapd/ssl.c
+@@ -1352,6 +1352,7 @@ int slapd_ssl_init2(PRFileDesc **fd, int startTLS)
+             }
+         }
+         slapi_ch_free_string( &val );
++        freeConfigEntry( &e );
+     }
+ #if !defined(NSS_TLS10) /* NSS_TLS11 or newer */
+     if (NSSVersionMin > 0) {
+@@ -1359,9 +1360,16 @@ int slapd_ssl_init2(PRFileDesc **fd, int startTLS)
+         /* Use new NSS API SSL_VersionRangeSet (NSS3.14 or newer) */
+         if (enableTLS1) {
+             NSSVersionMin = SSL_LIBRARY_VERSION_TLS_1_0;
++        } else {
++            NSSVersionMin = SSL_LIBRARY_VERSION_3_0;
++            NSSVersionMax = SSL_LIBRARY_VERSION_3_0;
+         }
+         if (enableSSL3) {
+             NSSVersionMin = SSL_LIBRARY_VERSION_3_0;
++        } else if (!enableTLS1) {
++            slapd_SSL_error("SSL Initialization 2: Both nsSSL3 and nsTLS1 are off.  Enabling nsTLS1.");
++            NSSVersionMin = SSL_LIBRARY_VERSION_TLS_1_0;
++            NSSVersionMax = enabledNSSVersions.max;
+         }
+         slapdNSSVersions.min = NSSVersionMin;
+         slapdNSSVersions.max = NSSVersionMax;
+@@ -1375,8 +1383,9 @@ int slapd_ssl_init2(PRFileDesc **fd, int startTLS)
+             /* Set the restricted value to the cn=encryption entry */
+         } else {
+             slapd_SSL_error("SSL Initialization 2: "
+-                            "Failed to set SSL range: min: %s, max: %s\n",
++                            "Failed to set SSL range: min: %s, max: %s.",
+                             mymin, mymax);
++            return 0;
+         }
+     } else {
+ #endif
+@@ -1401,7 +1410,6 @@ int slapd_ssl_init2(PRFileDesc **fd, int startTLS)
+ #if !defined(NSS_TLS10) /* NSS_TLS11 or newer */
+     }
+ #endif
+-    freeConfigEntry( &e );
+ 
+     if(( slapd_SSLclientAuth = config_get_SSLclientAuth()) != SLAPD_SSLCLIENTAUTH_OFF ) {
+         int err;
+-- 
+1.9.3
+

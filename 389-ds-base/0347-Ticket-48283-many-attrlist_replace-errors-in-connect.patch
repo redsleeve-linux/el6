@@ -1,0 +1,38 @@
+From c94f90124227ce79e99dcc78a7fd8d1eb883c928 Mon Sep 17 00:00:00 2001
+From: Ludwig Krispenz <lkrispen@redhat.com>
+Date: Tue, 22 Sep 2015 17:51:35 +0200
+Subject: [PATCH 347/347] Ticket 48283 - many attrlist_replace errors in
+ connection with cleanallruv
+
+Bug Description:  attrlist_replace error messages are logged because the
+                  list of values contains duplicate attributes
+
+Fix Description:  the duplicate values can appear because when a replica
+                  is removed from the ruv the array is compacted, but
+                  memcpy is used instead of memmove
+
+https://fedorahosted.org/389/ticket/48283
+
+Reviewed by: Rich, Thanks
+
+(cherry picked from commit e9c84a65e014b4ecda8edbebbdaa6a2a1ca932cf)
+---
+ ldap/servers/slapd/dl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/dl.c b/ldap/servers/slapd/dl.c
+index 6dc1a44..5fcb076 100644
+--- a/ldap/servers/slapd/dl.c
++++ b/ldap/servers/slapd/dl.c
+@@ -248,7 +248,7 @@ void *dl_delete (DataList *dl, const void *element, CMPFN cmpfn, FREEFN freefn)
+ 
+ 			if (i != dl->element_count - 1)
+ 			{
+-				memcpy (&dl->elements[i], &dl->elements[i+1], (dl->element_count - i - 1) * sizeof (void*));
++				memmove (&dl->elements[i], &dl->elements[i+1], (dl->element_count - i - 1) * sizeof (void*));
+ 			}
+ 		
+ 			dl->element_count --;
+-- 
+1.9.3
+

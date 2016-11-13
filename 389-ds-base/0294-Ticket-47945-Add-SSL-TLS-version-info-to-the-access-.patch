@@ -1,0 +1,211 @@
+From afe368b81ca436675b4a89596ab2ac73c838bd30 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Wed, 7 Jan 2015 11:35:32 -0800
+Subject: [PATCH 294/305] Ticket #47945 - Add SSL/TLS version info to the
+ access log
+
+Description: Added the currently used SSL library version info per
+connection to the access log.
+Sample output:
+  SSL
+  [..] conn=3 fd=64 slot=64 SSL connection from ::1 to ::1
+  [..] conn=3 TLS1.2 128-bit AES-GCM
+
+startTLS
+  [..] conn=4 op=0 EXT oid="1.3.6.1.4.1.1466.20037" name="startTLS"
+  [..] conn=4 op=0 RESULT err=0 tag=120 nentries=0 etime=0
+  [..] conn=4 TLS1.2 128-bit AES-GCM
+
+To convert the SSL version number to string (e.g., SSL_LIBRARY_VERSION_
+TLS_1_2 --> "TLS1.2"), instead of maintaining a mapping table, this
+patch calculates the number and generates the version string.
+
+Back-ported commit a2e0de3aa90f04593427628afeb7fe090dac93fb
+
+https://fedorahosted.org/389/ticket/47945
+(cherry picked from commit d62b281480c4c17438a6541c150bdb1e80abf14f)
+---
+ ldap/servers/slapd/auth.c          | 115 ++++++++++++++++++++-----------------
+ ldap/servers/slapd/slapi-private.h |  19 ++++++
+ 2 files changed, 80 insertions(+), 54 deletions(-)
+
+diff --git a/ldap/servers/slapd/auth.c b/ldap/servers/slapd/auth.c
+index 4976406..73f6c0e 100644
+--- a/ldap/servers/slapd/auth.c
++++ b/ldap/servers/slapd/auth.c
+@@ -433,6 +433,7 @@ handle_handshake_done (PRFileDesc *prfd, void* clientData)
+ 	SSLChannelInfo channelInfo;
+ 	SSLCipherSuiteInfo cipherInfo;
+ 	char* subject = NULL;
++	char sslversion[64];
+ 
+ 	if ( (slapd_ssl_getChannelInfo (prfd, &channelInfo, sizeof(channelInfo))) != SECSuccess ) {
+ 		PRErrorCode errorCode = PR_GetError();
+@@ -465,59 +466,63 @@ handle_handshake_done (PRFileDesc *prfd, void* clientData)
+ 	}
+     }
+ 
++    (void) slapi_getSSLVersion_str(channelInfo.protocolVersion, sslversion, sizeof(sslversion));
+     if (config_get_SSLclientAuth() == SLAPD_SSLCLIENTAUTH_OFF ) {
+-		slapi_log_access (LDAP_DEBUG_STATS, "conn=%" NSPRIu64 " SSL %i-bit %s\n",
+-		   		conn->c_connid, keySize, cipher ? cipher : "NULL" );
++		slapi_log_access (LDAP_DEBUG_STATS, "conn=%" NSPRIu64 " %s %i-bit %s\n",
++		                  (long long unsigned int)conn->c_connid,
++		                  sslversion, keySize, cipher ? cipher : "NULL" );
+ 		goto done;
+-    } 
++    }
+     if (clientCert == NULL) {
+-	slapi_log_access (LDAP_DEBUG_STATS, "conn=%" NSPRIu64 " SSL %i-bit %s\n",
+-		   conn->c_connid, keySize, cipher ? cipher : "NULL" );
++        slapi_log_access (LDAP_DEBUG_STATS, "conn=%" NSPRIu64 " %s %i-bit %s\n",
++                          (long long unsigned int)conn->c_connid,
++                          sslversion, keySize, cipher ? cipher : "NULL" );
+     } else {
+-	subject = subject_of (clientCert);
+-	if (!subject) {
+-		slapi_log_access( LDAP_DEBUG_STATS,
+-		       "conn=%" NSPRIu64 " SSL %i-bit %s; missing subject\n",
+-		       conn->c_connid, keySize, cipher ? cipher : "NULL");
+-		goto done;
+-	}
+-	{
+-	    char* issuer  = issuer_of (clientCert);
+-	    char sbuf[ BUFSIZ ], ibuf[ BUFSIZ ];
+-	    slapi_log_access( LDAP_DEBUG_STATS,
+-		       "conn=%" NSPRIu64 " SSL %i-bit %s; client %s; issuer %s\n",
+-		       conn->c_connid, keySize, cipher ? cipher : "NULL",
+-		       subject ? escape_string( subject, sbuf ) : "NULL",
+-		       issuer  ? escape_string( issuer,  ibuf ) : "NULL");
+-	    if (issuer) free (issuer);
+-	}
+-	slapi_dn_normalize (subject);
+-	{
+-	    LDAPMessage* chain = NULL;
+-		char *basedn = config_get_basedn();
+-		int err;
+-
+-	    err = ldapu_cert_to_ldap_entry
+-	              (clientCert, internal_ld, basedn?basedn:""/*baseDN*/, &chain);
+-	    if (err == LDAPU_SUCCESS && chain) {
+-		LDAPMessage* entry = slapu_first_entry (internal_ld, chain);
+-		if (entry) {
+-		    /* clientDN is duplicated in slapu_get_dn */
+-		    clientDN = slapu_get_dn (internal_ld, entry);
+-		} else {
+-		  
+-		    extraErrorMsg = "no entry";
+-		    LDAPDebug (LDAP_DEBUG_TRACE, "<= ldapu_cert_to_ldap_entry() %s\n",
+-			       extraErrorMsg, 0, 0);
+-		}
+-	    } else {
+-		extraErrorMsg = ldapu_err2string(err);
+-	        LDAPDebug (LDAP_DEBUG_TRACE, "<= ldapu_cert_to_ldap_entry() %i (%s)%s\n",
+-			   err, extraErrorMsg, chain ? "" : " NULL");
+-	    }
+-		slapi_ch_free_string(&basedn);
+-	    slapu_msgfree (internal_ld, chain);
+-	}
++        subject = subject_of (clientCert);
++        if (!subject) {
++            slapi_log_access( LDAP_DEBUG_STATS,
++                              "conn=%" NSPRIu64 " %s %i-bit %s; missing subject\n",
++                              (long long unsigned int)conn->c_connid,
++                              sslversion, keySize, cipher ? cipher : "NULL");
++            goto done;
++        }
++        {
++            char* issuer  = issuer_of (clientCert);
++            char sbuf[ BUFSIZ ], ibuf[ BUFSIZ ];
++            slapi_log_access( LDAP_DEBUG_STATS,
++                              "conn=%" NSPRIu64 " %s %i-bit %s; client %s; issuer %s\n",
++                              (long long unsigned int)conn->c_connid,
++                              sslversion, keySize, cipher ? cipher : "NULL",
++                              subject ? escape_string( subject, sbuf ) : "NULL",
++                              issuer  ? escape_string( issuer,  ibuf ) : "NULL");
++            if (issuer) free (issuer);
++        }
++        slapi_dn_normalize (subject);
++        {
++            LDAPMessage* chain = NULL;
++            char *basedn = config_get_basedn();
++            int err;
++
++            err = ldapu_cert_to_ldap_entry
++                      (clientCert, internal_ld, basedn?basedn:""/*baseDN*/, &chain);
++            if (err == LDAPU_SUCCESS && chain) {
++                LDAPMessage* entry = slapu_first_entry (internal_ld, chain);
++                if (entry) {
++                    /* clientDN is duplicated in slapu_get_dn */
++                    clientDN = slapu_get_dn (internal_ld, entry);
++                } else {
++                    extraErrorMsg = "no entry";
++                    LDAPDebug (LDAP_DEBUG_TRACE, "<= ldapu_cert_to_ldap_entry() %s\n",
++                               extraErrorMsg, 0, 0);
++                }
++            } else {
++                extraErrorMsg = ldapu_err2string(err);
++                LDAPDebug (LDAP_DEBUG_TRACE, "<= ldapu_cert_to_ldap_entry() %i (%s)%s\n",
++                           err, extraErrorMsg, chain ? "" : " NULL");
++            }
++                slapi_ch_free_string(&basedn);
++            slapu_msgfree (internal_ld, chain);
++        }
+     }
+ 
+     if (clientDN != NULL) {
+@@ -525,14 +530,16 @@ handle_handshake_done (PRFileDesc *prfd, void* clientData)
+         sdn = slapi_sdn_new_dn_passin(clientDN);
+         clientDN = slapi_ch_strdup(slapi_sdn_get_dn(sdn));
+         slapi_sdn_free(&sdn);
+-        slapi_log_access (LDAP_DEBUG_STATS, 
+-                          "conn=%" NSPRIu64 " SSL client bound as %s\n",
+-                          conn->c_connid, clientDN);
++        slapi_log_access (LDAP_DEBUG_STATS,
++                          "conn=%" NSPRIu64 " %s client bound as %s\n",
++                          (long long unsigned int)conn->c_connid,
++                          sslversion, clientDN);
+     } else if (clientCert != NULL) {
+         slapi_log_access (LDAP_DEBUG_STATS,
+-                          "conn=%" NSPRIu64 " SSL failed to map client "
++                          "conn=%" NSPRIu64 " %s failed to map client "
+                           "certificate to LDAP DN (%s)\n",
+-                          conn->c_connid, extraErrorMsg );
++                          (long long unsigned int)conn->c_connid,
++                          sslversion, extraErrorMsg);
+     }
+ 
+ 	/*
+diff --git a/ldap/servers/slapd/slapi-private.h b/ldap/servers/slapd/slapi-private.h
+index 8507f47..18f0e94 100644
+--- a/ldap/servers/slapd/slapi-private.h
++++ b/ldap/servers/slapd/slapi-private.h
+@@ -1278,6 +1278,25 @@ void modify_update_last_modified_attr(Slapi_PBlock *pb, Slapi_Mods *smods);
+ /* add.c */
+ void add_internal_modifiersname(Slapi_PBlock *pb, Slapi_Entry *e);
+ 
++/* ssl.c */
++/*
++ * If non NULL buf and positive bufsize is given,
++ * the memory is used to store the version string.
++ * Otherwise, the memory for the string is allocated.
++ * The latter case, caller is responsible to free it.
++ */
++/* vnum is supposed to be in one of the following:
++ * nss3/sslproto.h
++ * #define SSL_LIBRARY_VERSION_2                   0x0002
++ * #define SSL_LIBRARY_VERSION_3_0                 0x0300
++ * #define SSL_LIBRARY_VERSION_TLS_1_0             0x0301
++ * #define SSL_LIBRARY_VERSION_TLS_1_1             0x0302
++ * #define SSL_LIBRARY_VERSION_TLS_1_2             0x0303
++ * #define SSL_LIBRARY_VERSION_TLS_1_3             0x0304
++ * ...
++ */
++char *slapi_getSSLVersion_str(PRUint16 vnum, char *buf, size_t bufsize);
++
+ #ifdef __cplusplus
+ }
+ #endif
+-- 
+1.9.3
+

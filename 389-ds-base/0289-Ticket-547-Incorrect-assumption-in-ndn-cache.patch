@@ -1,0 +1,62 @@
+From 55c0904b0b844be3e4b82b4b07fda679ad437298 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@totoro.usersys.redhat.com>
+Date: Mon, 7 Jan 2013 17:07:52 -0800
+Subject: [PATCH 289/305] Ticket #547 - Incorrect assumption in ndn cache
+
+Bug Description: In ndn_cache_lookup, to determine the given dn
+is already normalized or not, the length is compared with the
+normalized dn length.  If they match, it considers the given dn
+is already normalized.  But there are cases even if the lengths
+are equal, the given dn may not be normalized yet.
+(e.g., 'cn="o=ABC",o=XYZ' vs. 'cn=o\3DABC,o=XYZ')
+
+Fix Description: This patch adds another check: if the dn and
+normalized dn length match, call memcmp to compare the 2 dn's.
+When memcmp returns 0, ndn_cache_lookup returns the passed dn.
+
+https://fedorahosted.org/389/ticket/547
+
+Reviewed by mreynolds (Thanks, Mark!).
+
+(cherry picked from commit 0c44a46448595fdb1e079b5f4c91d4d8bfa2e0f2)
+
+Conflicts:
+	ldap/servers/slapd/dn.c
+
+(cherry picked from commit 10ddfbc793a77f5c1a19302034239a53c07e3ab2)
+---
+ ldap/servers/slapd/dn.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/ldap/servers/slapd/dn.c b/ldap/servers/slapd/dn.c
+index 283f265..53c378a 100644
+--- a/ldap/servers/slapd/dn.c
++++ b/ldap/servers/slapd/dn.c
+@@ -2788,16 +2788,19 @@ ndn_cache_lookup(char *dn, size_t dn_len, char **result, char **udn, int *rc)
+     if(ndn_ht_val){
+         ndn_cache_update_lru(&ndn_ht_val->lru_node);
+         slapi_counter_increment(ndn_cache->cache_hits);
+-        if(ndn_ht_val->len == dn_len ){
+-            /* the dn was already normalized, just return the dn as the result */
+-            *result = dn;
+-            *rc = 0;
+-        } else {
++        if ((ndn_ht_val->len != dn_len) || 
++            /* even if the lengths match, dn may not be normalized yet.
++             * (e.g., 'cn="o=ABC",o=XYZ' vs. 'cn=o\3DABC,o=XYZ') */
++            (memcmp(dn, ndn_ht_val->ndn, dn_len))){
+             *rc = 1; /* free result */
+             ndn = slapi_ch_malloc(ndn_ht_val->len + 1);
+             memcpy(ndn, ndn_ht_val->ndn, ndn_ht_val->len);
+             ndn[ndn_ht_val->len] = '\0';
+             *result = ndn;
++        } else {
++            /* the dn was already normalized, just return the dn as the result */
++            *result = dn;
++            *rc = 0;
+         }
+         rv = 1;
+     } else {
+-- 
+1.9.3
+

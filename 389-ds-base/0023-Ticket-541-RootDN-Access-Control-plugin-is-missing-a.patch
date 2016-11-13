@@ -1,0 +1,67 @@
+From 7fd5f3859be9c0c266201dd76853f82cb74ffe9e Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 18 Dec 2012 15:58:32 -0500
+Subject: [PATCH 23/24] Ticket 541 - RootDN Access Control plugin is missing after upgrade
+
+Created the upgrade ldif: 50rootdnaccesscontrolplugin.ldif
+
+https://fedorahosted.org/389/ticket/541
+
+Reviewed by: richm(Thanks)
+(cherry picked from commit 9a7fa90eed49f47aa0bc64c496815fececb437f2)
+---
+ Makefile.am                                        |    1 +
+ Makefile.in                                        |    1 +
+ .../src/scripts/50rootdnaccesscontrolplugin.ldif   |   16 ++++++++++++++++
+ 3 files changed, 18 insertions(+), 0 deletions(-)
+ create mode 100644 ldap/admin/src/scripts/50rootdnaccesscontrolplugin.ldif
+
+diff --git a/Makefile.am b/Makefile.am
+index 507a2d6..9ad2c3a 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -489,6 +489,7 @@ update_DATA = ldap/admin/src/scripts/exampleupdate.pl \
+ 	ldap/admin/src/scripts/50faxsyntaxplugin.ldif \
+ 	ldap/admin/src/scripts/50fixNsState.pl \
+ 	ldap/admin/src/scripts/50telexnumbersyntaxplugin.ldif \
++	ldap/admin/src/scripts/50rootdnaccesscontrolplugin.ldif \
+ 	ldap/admin/src/scripts/50guidesyntaxplugin.ldif \
+ 	ldap/ldif/50replication-plugins.ldif \
+ 	ldap/admin/src/scripts/50linkedattrsplugin.ldif \
+diff --git a/Makefile.in b/Makefile.in
+index f105932..f731cfb 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -1715,6 +1715,7 @@ update_DATA = ldap/admin/src/scripts/exampleupdate.pl \
+ 	ldap/admin/src/scripts/50faxsyntaxplugin.ldif \
+ 	ldap/admin/src/scripts/50fixNsState.pl \
+ 	ldap/admin/src/scripts/50telexnumbersyntaxplugin.ldif \
++	ldap/admin/src/scripts/50rootdnaccesscontrolplugin.ldif \
+ 	ldap/admin/src/scripts/50guidesyntaxplugin.ldif \
+ 	ldap/ldif/50replication-plugins.ldif \
+ 	ldap/admin/src/scripts/50linkedattrsplugin.ldif \
+diff --git a/ldap/admin/src/scripts/50rootdnaccesscontrolplugin.ldif b/ldap/admin/src/scripts/50rootdnaccesscontrolplugin.ldif
+new file mode 100644
+index 0000000..1b5e8b0
+--- /dev/null
++++ b/ldap/admin/src/scripts/50rootdnaccesscontrolplugin.ldif
+@@ -0,0 +1,16 @@
++dn: cn=RootDN Access Control,cn=plugins,cn=config
++objectclass: top
++objectclass: nsSlapdPlugin
++objectclass: extensibleObject
++cn: RootDN Access Control
++nsslapd-pluginpath: librootdn-access-plugin.so
++nsslapd-plugininitfunc: rootdn_init
++nsslapd-plugintype: internalpreoperation
++nsslapd-pluginenabled: on
++nsslapd-plugin-depends-on-type: database
++# these will be replaced when the server loads the plugin
++nsslapd-pluginId: ID
++nsslapd-pluginVersion: PACKAGE_VERSION
++nsslapd-pluginVendor: VENDOR
++nsslapd-pluginDescription: DESC
++
+-- 
+1.7.1
+

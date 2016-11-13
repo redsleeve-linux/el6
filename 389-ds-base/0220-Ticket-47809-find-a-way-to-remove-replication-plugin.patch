@@ -1,0 +1,92 @@
+From 5c1be98f1c032fee3b82495d1d56a4c1495d08f8 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Wed, 11 Jun 2014 10:15:25 -0700
+Subject: [PATCH 220/225] Ticket #47809 - find a way to remove replication
+ plugin errors messages "changelog iteration code returned a dummy entry with
+ csn %s, skipping ..."
+
+Description:
+1) Can't locate CSN %s in the changelog (DB rc=%d).
+   Print the message once per one missing CSN.
+2) changelog iteration code returned a dummy entry with csn %s, skipping ...
+   Downgrade the log level to replication log level (SLAPI_LOG_REPL).
+
+https://fedorahosted.org/389/ticket/47809
+
+Reviewed by rmeggins@redhat.com (Thanks, Rich!)
+(cherry picked from commit 6a1b10db6d41be9e3aadf6f7cbb18aaf4d00e87b)
+(cherry picked from commit ddca54d9d8e8d7f3f8b1cd431cbf6381361f323e)
+(cherry picked from commit e50653fffab5036e2027f99f9d2b2bf70f498e2e)
+(cherry picked from commit b4248f87124e2e3a62eb82a9b196c01b6aa41892)
+---
+ ldap/servers/plugins/replication/cl5_clcache.c        | 11 ++++++++---
+ ldap/servers/plugins/replication/repl5_inc_protocol.c | 16 ++++++++--------
+ 2 files changed, 16 insertions(+), 11 deletions(-)
+
+diff --git a/ldap/servers/plugins/replication/cl5_clcache.c b/ldap/servers/plugins/replication/cl5_clcache.c
+index d86620f..60f288e 100644
+--- a/ldap/servers/plugins/replication/cl5_clcache.c
++++ b/ldap/servers/plugins/replication/cl5_clcache.c
+@@ -111,6 +111,7 @@ struct clc_buffer {
+ 	DBT			 buf_data;			/* data retrived from db */
+ 	void		*buf_record_ptr;	/* ptr to the current record in data */
+ 	CSN			*buf_missing_csn;	/* used to detect persistent missing of CSN */
++	CSN			*buf_prev_missing_csn;	/* used to surpress the repeated messages */
+ 
+ 	/* fields for control the CSN sequence sent to the consumer */
+ 	struct csn_seq_ctrl_block **buf_cscbs;
+@@ -376,9 +377,12 @@ clcache_load_buffer ( CLC_Buffer *buf, CSN *anchorcsn, int flag )
+ 		else if ( anchorcsn ) {
+ 			/* Report error only when the missing is persistent */
+ 			if ( buf->buf_missing_csn && csn_compare (buf->buf_missing_csn, anchorcsn) == 0 ) {
+-				slapi_log_error ( SLAPI_LOG_FATAL, buf->buf_agmt_name,
+-					"Can't locate CSN %s in the changelog (DB rc=%d). The consumer may need to be reinitialized.\n",
+-					(char*)buf->buf_key.data, rc );
++				if (!buf->buf_prev_missing_csn || csn_compare (buf->buf_prev_missing_csn, anchorcsn)) {
++					slapi_log_error ( SLAPI_LOG_FATAL, buf->buf_agmt_name,
++						"Can't locate CSN %s in the changelog (DB rc=%d). If replication stops, the consumer may need to be reinitialized.\n",
++						(char*)buf->buf_key.data, rc );
++					csn_dup_or_init_by_csn (&buf->buf_prev_missing_csn, anchorcsn);
++				}
+ 			}
+ 			else {
+ 				csn_dup_or_init_by_csn (&buf->buf_missing_csn, anchorcsn);
+@@ -915,6 +919,7 @@ clcache_delete_buffer ( CLC_Buffer **buf )
+ 		slapi_ch_free (&( (*buf)->buf_data.data ));
+ 		csn_free (&( (*buf)->buf_current_csn ));
+ 		csn_free (&( (*buf)->buf_missing_csn ));
++		csn_free (&( (*buf)->buf_prev_missing_csn ));
+ 		slapi_ch_free ( (void **) buf );
+ 	}
+ }
+diff --git a/ldap/servers/plugins/replication/repl5_inc_protocol.c b/ldap/servers/plugins/replication/repl5_inc_protocol.c
+index 6a2179a..5d3e143 100644
+--- a/ldap/servers/plugins/replication/repl5_inc_protocol.c
++++ b/ldap/servers/plugins/replication/repl5_inc_protocol.c
+@@ -1694,15 +1694,15 @@ send_updates(Private_Repl_Protocol *prp, RUV *remote_update_vector, PRUint32 *nu
+ 			switch (rc)
+ 			{
+ 			case CL5_SUCCESS:
+-                /* check that we don't return dummy entries */
+-                if (is_dummy_operation (entry.op))
+-                {
+-                    slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name, 
+-                        "%s: changelog iteration code returned a dummy entry with csn %s, "
+-                        "skipping ...\n",
++				/* check that we don't return dummy entries */
++				if (is_dummy_operation (entry.op))
++				{
++					slapi_log_error(SLAPI_LOG_REPL, repl_plugin_name, 
++						"%s: changelog iteration code returned a dummy entry with csn %s, "
++						"skipping ...\n",
+ 						agmt_get_long_name(prp->agmt), csn_as_string(entry.op->csn, PR_FALSE, csn_str));
+-				    continue;
+-                }
++					continue;
++				}
+ 				replay_crc = replay_update(prp, entry.op, &message_id);
+ 				if (message_id) 
+ 				{
+-- 
+1.8.1.4
+

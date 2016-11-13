@@ -1,0 +1,40 @@
+From 9cac610c7168c071c07d1bba4f3013e550b93791 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Mon, 18 Aug 2014 14:45:40 -0400
+Subject: [PATCH 251/251] Ticket #47875 - dirsrv not running with old openldap
+
+Description: ran autogen.sh
+(cherry picked from commit e476c664d6ad2875e454722c6451a5411b1f38d1)
+---
+ Makefile.in | 2 +-
+ configure   | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile.in b/Makefile.in
+index f731cfb..930d22b 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -10428,7 +10428,7 @@ distcheck: dist
+ 	*.zip*) \
+ 	  unzip $(distdir).zip ;;\
+ 	esac
+-	chmod -R a-w $(distdir); chmod a+w $(distdir)
++	chmod -R a-w $(distdir); chmod u+w $(distdir)
+ 	mkdir $(distdir)/_build
+ 	mkdir $(distdir)/_inst
+ 	chmod a-w $(distdir)
+diff --git a/configure b/configure
+index 809b471..23d3f74 100755
+--- a/configure
++++ b/configure
+@@ -25013,6 +25013,7 @@ fi
+ 
+ 
+ 
++
+ cat >>confdefs.h <<\_ACEOF
+ #define LDAP_DEBUG 1
+ _ACEOF
+-- 
+1.8.1.4
+

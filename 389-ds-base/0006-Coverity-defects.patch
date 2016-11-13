@@ -1,0 +1,93 @@
+From 2f960e4bd658679330faa249981f1b48bc7a6e03 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@totoro.usersys.redhat.com>
+Date: Wed, 24 Oct 2012 15:27:48 -0700
+Subject: [PATCH 06/10] Coverity defects
+
+The commit b9eeb2e1a8e688dfec753e8965d0e5aeb119e638 for Ticket #481
+"expand nested posix groups" introduced 4 coverity defects.
+
+Description:
+13100, 13101: Missing return statement
+Fix description: addUserToGroupMembership and propogateDeletion-
+UpwardCallback are declared to return an integer value, but
+nothing was returned.  This patch changes it to return 0.
+
+13102: Resource leak
+Fix description: The memory of valueset muid_old_vs is internally
+allocated.  It was meant to be set to muid_upward_vs and freed
+together when muid_upward_vs is freed.  But due to the function
+calling order, it was not properly set and it lost the chance to
+be freed.  This patch calls slapi_attr_get_valueset prior to
+slapi_valueset_set_valueset and let free muid_old_vs together
+with slapi_valueset_set_valueset.
+
+13103: Uninitialized pointer read
+Fix description: Possibly uninitialized variable was passed to
+a logging function slapi_log_error, but actually it was not
+referred.  With this patch, the variable filter is no longer to
+passed to the function.
+(cherry picked from commit e9941a2915ac848abe9a4afe802d0432aa0c354a)
+(cherry picked from commit a57d9131f9d0ae7a5d9865dd6be7f37f26de376c)
+---
+ .../plugins/posix-winsync/posix-group-func.c       |    8 +++++---
+ .../plugins/posix-winsync/posix-group-task.c       |    4 ++--
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/ldap/servers/plugins/posix-winsync/posix-group-func.c b/ldap/servers/plugins/posix-winsync/posix-group-func.c
+index 66b9272..be3a6ec 100644
+--- a/ldap/servers/plugins/posix-winsync/posix-group-func.c
++++ b/ldap/servers/plugins/posix-winsync/posix-group-func.c
+@@ -473,15 +473,15 @@ propogateMembershipUpward(Slapi_Entry *entry, Slapi_ValueSet *muid_vs, int depth
+             muid_here_vs = muid_vs;
+         }
+         else {
++            int i = 0;
++            Slapi_Value *v = NULL;
+             /* Eliminate duplicates */
+             muid_upward_vs = slapi_valueset_new();
+             muid_here_vs = slapi_valueset_new();
+ 
++            slapi_attr_get_valueset(muid_old_attr, &muid_old_vs);
+             slapi_valueset_set_valueset(muid_upward_vs, muid_old_vs);
+ 
+-            slapi_attr_get_valueset(muid_old_attr, &muid_old_vs);
+-            int i = 0;
+-            Slapi_Value *v = NULL;
+             for (i = slapi_valueset_first_value(muid_vs, &v); i != -1;
+                  i = slapi_valueset_next_value(muid_vs, i, &v)) {
+                 
+@@ -542,6 +542,7 @@ propogateDeletionsUpwardCallback(Slapi_Entry *entry, void *callback_data)
+ {
+     struct propogateDeletionsUpwardArgs *args = (struct propogateDeletionsUpwardArgs *)(callback_data);
+     propogateDeletionsUpward(entry, args->base_sdn, args->smod_deluids, args->del_nested_vs, args->depth);
++    return 0;
+ }
+ 
+ void
+@@ -920,6 +921,7 @@ addUserToGroupMembership(Slapi_Entry *entry)
+     propogateMembershipUpward(entry, muid_vs, 0);
+ 
+     slapi_valueset_free(muid_vs); muid_vs = NULL;
++    return 0;
+ }
+ 
+ int
+diff --git a/ldap/servers/plugins/posix-winsync/posix-group-task.c b/ldap/servers/plugins/posix-winsync/posix-group-task.c
+index 4555f1b..e5385b0 100644
+--- a/ldap/servers/plugins/posix-winsync/posix-group-task.c
++++ b/ldap/servers/plugins/posix-winsync/posix-group-task.c
+@@ -152,9 +152,9 @@ posix_group_task_add(Slapi_PBlock *pb, Slapi_Entry *e, Slapi_Entry *eAfter, int
+         rv = SLAPI_DSE_CALLBACK_OK;
+     }
+ 
+-    out: 
++out: 
+     slapi_log_error(SLAPI_LOG_PLUGIN, POSIX_WINSYNC_PLUGIN_NAME,
+-                    "posix_group_task_add: <==\n", filter);
++                    "posix_group_task_add: <==\n");
+ 
+     return rv;
+ }
+-- 
+1.7.1
+

@@ -1,0 +1,38 @@
+From 2dd6692669017c97d488a511caafa39d994ed14a Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Tue, 2 Jul 2013 14:40:00 -0600
+Subject: [PATCH 79/99] Ticket #47409 - allow setting db deadlock rejection
+ policy
+
+https://fedorahosted.org/389/ticket/47409
+Reviewed by: nhosoi (Thanks!)
+Branch: 389-ds-base-1.2.11
+Fix Description: Fix coverity CID 11893 (#1 of 1): Unsigned compared against 0 (NO_EFFECT)
+val is u_int32_t which is never less than 0
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: yes - document new config parameter
+(cherry picked from commit 989a30bb2d63ee6b9157a9eb6a3d2ff6828abc60)
+(cherry picked from commit 75b9e42a6555073d902526c20a606d17fd11f967)
+(cherry picked from commit 1baa10dd3c14c6cdc29aae5d114547df812b5c17)
+(cherry picked from commit d1aef99989c498cde20fc311b05780702efee653)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_config.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_config.c b/ldap/servers/slapd/back-ldbm/ldbm_config.c
+index 44ccf78..b713f73 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_config.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_config.c
+@@ -1339,7 +1339,7 @@ static int ldbm_config_db_deadlock_policy_set(void *arg, void *value, char *erro
+     int retval = LDAP_SUCCESS;
+     u_int32_t val = (u_int32_t) ((uintptr_t)value);
+ 
+-    if ((val < DB_LOCK_NORUN) || (val > DB_LOCK_YOUNGEST)) {
++    if (val > DB_LOCK_YOUNGEST) {
+ 	    PR_snprintf(errorbuf, SLAPI_DSE_RETURNTEXT_SIZE,
+ 	                "Error: Invalid value for %s (%d). Must be between %d and %d inclusive",
+ 	                CONFIG_DB_DEADLOCK_POLICY, val, DB_LOCK_DEFAULT, DB_LOCK_YOUNGEST);
+-- 
+1.8.1.4
+

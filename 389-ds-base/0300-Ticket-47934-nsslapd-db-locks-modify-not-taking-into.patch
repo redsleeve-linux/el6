@@ -1,0 +1,142 @@
+From 2195ce2313fcf78a2ebff6525e399d1267665c2b Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 9 Jan 2015 16:50:12 -0800
+Subject: [PATCH 300/305] Ticket #47934 - nsslapd-db-locks modify not taking
+ into account.
+
+Description: Updating the value of nsslapd-db-locks was not detected
+at the server's startup time.  As suggested in
+    https://fedorahosted.org/389/ticket/47934#comment:1
+the value is stored in the guardian file as "locks:20000" at the shut-
+down time.  When restarting the server, the nsslapd-db-locks value in
+cn=config,cn=ldbm database,cn=plugins,cn=config is compared with the
+stored value (20000, in this example) and if they don't match, the
+lock table is recreated.  The change is logged in the error log:
+    [...] - resizing max db lock count: 20000 -> 30000
+
+https://fedorahosted.org/389/ticket/47934
+
+Reviewed by mreynolds@redhat.com (Thank you, Mark!!)
+
+(cherry picked from commit f4437defacf8812c5f95869147a99f8412dc4a07)
+(cherry picked from commit dc4185ea40e1f1b8527a67a0c854fcc29b8bafe7)
+(cherry picked from commit d1e4698530868532bd472c70ca8ccc4a317b4199)
+(cherry picked from commit 86b728f88fe0d35f403c012166f98c3a0e69ad32)
+(cherry picked from commit 295cf31602797b09a3b7a7c7e8d2feb71017522b)
+---
+ ldap/servers/slapd/back-ldbm/dblayer.c     | 33 ++++++++++++++++++++++--------
+ ldap/servers/slapd/back-ldbm/dblayer.h     |  2 ++
+ ldap/servers/slapd/back-ldbm/ldbm_config.c |  4 ++--
+ 3 files changed, 29 insertions(+), 10 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/dblayer.c b/ldap/servers/slapd/back-ldbm/dblayer.c
+index 6f66a75..b25fccb 100644
+--- a/ldap/servers/slapd/back-ldbm/dblayer.c
++++ b/ldap/servers/slapd/back-ldbm/dblayer.c
+@@ -1069,6 +1069,8 @@ static void dblayer_dump_config_tracing(dblayer_private *priv)
+     LDAPDebug(LDAP_DEBUG_TRACE,"private import mem=%d\n",priv->dblayer_private_import_mem,0,0);
+     LDAPDebug(LDAP_DEBUG_TRACE,"shm_key=%ld\n",priv->dblayer_shm_key,0,0);
+     LDAPDebug(LDAP_DEBUG_TRACE,"lockdown=%d\n",priv->dblayer_lockdown,0,0);
++    LDAPDebug(LDAP_DEBUG_TRACE,"locks=%d\n",priv->dblayer_lock_config,0,0);
++    LDAPDebug(LDAP_DEBUG_TRACE,"previous_locks=%d\n",priv->dblayer_previous_lock_config,0,0);
+     LDAPDebug(LDAP_DEBUG_TRACE,"tx_max=%d\n",priv->dblayer_tx_max,0,0);
+ }
+ 
+@@ -1597,13 +1599,24 @@ dblayer_start(struct ldbminfo *li, int dbmode)
+ 
+     /* Is the cache being re-sized ? (If we're just doing an archive or export,
+      * we don't care if the cache is being re-sized) */
+-    if ( (priv->dblayer_previous_cachesize || priv->dblayer_previous_ncache) &&
+-         ((priv->dblayer_cachesize != priv->dblayer_previous_cachesize) ||
+-          (priv->dblayer_ncache != priv->dblayer_previous_ncache)) &&
+-         !(dbmode & (DBLAYER_ARCHIVE_MODE|DBLAYER_EXPORT_MODE)) ) {
+-         LDAPDebug(LDAP_DEBUG_ANY,
+-                      "I'm resizing my cache now...cache was %lu and is now %lu\n",
++    if ((priv->dblayer_previous_cachesize || priv->dblayer_previous_ncache) &&
++        (priv->dblayer_previous_lock_config) &&
++        ((priv->dblayer_cachesize != priv->dblayer_previous_cachesize) ||
++         (priv->dblayer_ncache != priv->dblayer_previous_ncache) ||
++         (priv->dblayer_lock_config != priv->dblayer_previous_lock_config)) &&
++        !(dbmode & (DBLAYER_ARCHIVE_MODE|DBLAYER_EXPORT_MODE)) ) {
++        if (priv->dblayer_cachesize != priv->dblayer_previous_cachesize) {
++            LDAPDebug(LDAP_DEBUG_ANY, "resizing db cache size: %lu -> %lu\n",
+                       priv->dblayer_previous_cachesize, priv->dblayer_cachesize, 0);
++        }
++        if (priv->dblayer_ncache != priv->dblayer_previous_ncache) {
++            LDAPDebug(LDAP_DEBUG_ANY, "resizing db cache count: %d -> %d\n",
++                      priv->dblayer_previous_ncache, priv->dblayer_ncache, 0);
++        }
++        if (priv->dblayer_lock_config != priv->dblayer_previous_lock_config) {
++            LDAPDebug(LDAP_DEBUG_ANY, "resizing max db lock count: %d -> %d\n",
++                      priv->dblayer_previous_lock_config, priv->dblayer_lock_config, 0);
++        }
+         dblayer_reset_env(li);
+         /*
+          * Once pEnv->remove (via dblayer_reset_env) has been called,
+@@ -4786,8 +4799,8 @@ static int commit_good_database(dblayer_private *priv)
+             filename, PR_GetError(), slapd_pr_strerror(PR_GetError()) );
+         return -1;
+     } 
+-    PR_snprintf(line,sizeof(line),"cachesize:%lu\nncache:%d\nversion:%d\n",
+-            priv->dblayer_cachesize, priv->dblayer_ncache, DB_VERSION_MAJOR);
++    PR_snprintf(line,sizeof(line),"cachesize:%lu\nncache:%d\nversion:%d\nlocks:%d\n",
++            (long unsigned int)priv->dblayer_cachesize, priv->dblayer_ncache, DB_VERSION_MAJOR, priv->dblayer_lock_config);
+     num_bytes = strlen(line);
+     return_value = slapi_write_buffer(prfd, line, num_bytes);
+     if (return_value != num_bytes)
+@@ -4833,6 +4846,7 @@ static int read_metadata(struct ldbminfo *li)
+      * priv->dblayer_recovery_required = 0; */
+     priv->dblayer_previous_cachesize = 0;
+     priv->dblayer_previous_ncache = 0;
++    priv->dblayer_previous_lock_config = 0;
+     /* Open the guard file and read stuff, then delete it */
+     PR_snprintf(filename,sizeof(filename),"%s/guardian",priv->dblayer_home_directory);
+ 
+@@ -4902,6 +4916,9 @@ static int read_metadata(struct ldbminfo *li)
+                 number = atoi(value);
+                 priv->dblayer_previous_ncache = number;
+             } else if (0 == strcmp("version",attribute)) {
++            } else if (0 == strcmp("locks",attribute)) {
++                number = atoi(value);
++                priv->dblayer_previous_lock_config = number;
+             }
+             if (NULL == nextline || '\0' == *nextline) {
+                 /* Nothing more to read */
+diff --git a/ldap/servers/slapd/back-ldbm/dblayer.h b/ldap/servers/slapd/back-ldbm/dblayer.h
+index 4ff9d53..3e4f4d8 100644
+--- a/ldap/servers/slapd/back-ldbm/dblayer.h
++++ b/ldap/servers/slapd/back-ldbm/dblayer.h
+@@ -178,6 +178,8 @@ struct dblayer_private
+     PRCondVar *thread_count_cv;     /* condition variable for housekeeping thread shutdown */
+     int dblayer_lockdown;           /* use DB_LOCKDOWN */
+     int dblayer_lock_config;
++    int dblayer_previous_lock_config;/* Max lock count when we last shut down--
++                                      * used to determine if we delete the mpool */
+     u_int32_t dblayer_deadlock_policy;    /* i.e. the atype to DB_ENV->lock_detect in deadlock_threadmain */
+ };
+ 
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_config.c b/ldap/servers/slapd/back-ldbm/ldbm_config.c
+index 11aa42d..462b0a1 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_config.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_config.c
+@@ -948,7 +948,7 @@ static int ldbm_config_db_lock_set(void *arg, void *value, char *errorbuf, int p
+     if (apply) {
+         if (CONFIG_PHASE_RUNNING == phase) {
+             li->li_dblayer_private->dblayer_lock_config = val;
+-            LDAPDebug(LDAP_DEBUG_ANY, "New db cache size will not take affect until the server is restarted\n", 0, 0, 0);
++            LDAPDebug(LDAP_DEBUG_ANY, "New db max lock count will not take affect until the server is restarted\n", 0, 0, 0);
+         } else {
+             li->li_dblayer_private->dblayer_lock_config = val;
+         }
+@@ -1390,7 +1390,7 @@ static config_info ldbm_config[] = {
+     {CONFIG_DB_VERBOSE, CONFIG_TYPE_ONOFF, "off", &ldbm_config_db_verbose_get, &ldbm_config_db_verbose_set, 0},
+     {CONFIG_DB_DEBUG, CONFIG_TYPE_ONOFF, "on", &ldbm_config_db_debug_get, &ldbm_config_db_debug_set, 0},
+     {CONFIG_DB_NAMED_REGIONS, CONFIG_TYPE_ONOFF, "off", &ldbm_config_db_named_regions_get, &ldbm_config_db_named_regions_set, 0},
+-    {CONFIG_DB_LOCK, CONFIG_TYPE_INT, "10000", &ldbm_config_db_lock_get, &ldbm_config_db_lock_set, 0},
++    {CONFIG_DB_LOCK, CONFIG_TYPE_INT, "10000", &ldbm_config_db_lock_get, &ldbm_config_db_lock_set, CONFIG_FLAG_ALWAYS_SHOW},
+     {CONFIG_DB_PRIVATE_MEM, CONFIG_TYPE_ONOFF, "off", &ldbm_config_db_private_mem_get, &ldbm_config_db_private_mem_set, 0},
+     {CONFIG_DB_PRIVATE_IMPORT_MEM, CONFIG_TYPE_ONOFF, "on", &ldbm_config_db_private_import_mem_get, &ldbm_config_db_private_import_mem_set, CONFIG_FLAG_ALWAYS_SHOW|CONFIG_FLAG_ALLOW_RUNNING_CHANGE},
+     {CONDIF_DB_ONLINE_IMPORT_ENCRYPT, CONFIG_TYPE_ONOFF, "on", &ldbm_config_db_online_import_encrypt_get, &ldbm_config_db_online_import_encrypt_set, 0},
+-- 
+1.9.3
+

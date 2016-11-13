@@ -1,0 +1,47 @@
+From f6eef3cd99d0fe3ba3f93c75fb676907c2b12f61 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Mon, 22 Apr 2013 20:28:14 -0600
+Subject: [PATCH 128/225] Ticket #47341 - logconv.pl -m time calculation is
+ wrong
+
+https://fedorahosted.org/389/ticket/47341
+Reviewed by: nkinder (Thanks!)
+Branch: 389-ds-base-1.3.1
+Fix Description: The variable name is $hr, not $hours.  The regex for the
+sign in the timezone should have been (.) not (?).
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: no
+(cherry picked from commit 87f5ef5a97437cc92afe2496cd06e5d2ec71d9ff)
+(cherry picked from commit 1878bbfef7ae76ed18d709d5414e21cbd0961a38)
+(cherry picked from commit eea06437c2be14fa9ab70dc983e2ab138f8d62c8)
+(cherry picked from commit d1cae968b71409f93a41957d4851509ce0cbb8c5)
+---
+ ldap/admin/src/logconv.pl | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/admin/src/logconv.pl b/ldap/admin/src/logconv.pl
+index 757f799..3b8adc5 100755
+--- a/ldap/admin/src/logconv.pl
++++ b/ldap/admin/src/logconv.pl
+@@ -1574,7 +1574,7 @@ sub parseLineNormal
+ 		{
+ 		    # tz offset change
+ 		    $lastzone=$tzone;
+-		    ($sign,$hr,$min) = $tzone =~ m/(?)(\d\d)(\d\d)/;
++		    ($sign,$hr,$min) = $tzone =~ m/(.)(\d\d)(\d\d)/;
+ 		    $tzoff = $hr*3600 + $min*60;
+ 		    $tzoff *= -1
+ 		    if $sign eq '-';
+@@ -1582,7 +1582,7 @@ sub parseLineNormal
+ 		}
+ 		($date, $hr, $min, $sec) = split (':', $time);
+ 		($day, $mon, $yr) = split ('/', $date);
+-		$newmin = timegm(0, $min, $hours, $day, $monthname{$mon}, $yr) - $tzoff;
++		$newmin = timegm(0, $min, $hr, $day, $monthname{$mon}, $yr) - $tzoff;
+ 		$gmtime = $newmin + $sec;
+ 		print_stats_block( $s_stats );
+ 		reset_stats_block( $s_stats, $gmtime, $time.' '.$tzone );
+-- 
+1.8.1.4
+

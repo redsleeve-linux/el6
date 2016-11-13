@@ -1,0 +1,30 @@
+From 6ec945fd7d66e4377a608765f02880ca8a858429 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Sun, 12 Apr 2015 17:46:52 -0700
+Subject: [PATCH 311/319] Ticket 408 - Backport of Normalized DN Cache
+
+Description: commit 2a8da7ea76d15906fdb98b47534fc3447f12c752 set the
+type of nsslapd-ndn-cache-enabled to CONFIG_INT.  This patch corrects
+it to CONFIG_ON_OFF.
+
+(cherry picked from commit 37d569605e23b94192b7aaf06fb44dca4a73fe0e)
+---
+ ldap/servers/slapd/libglobs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index dbb0fa8..3672d99 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -1037,7 +1037,7 @@ static struct config_get_and_set {
+ 		CONFIG_ON_OFF, (ConfigGetFunc)config_get_ignore_time_skew, &init_ignore_time_skew},
+ 	{CONFIG_NDN_CACHE, config_set_ndn_cache_enabled,
+ 		NULL, 0,
+-		(void**)&global_slapdFrontendConfig.ndn_cache_enabled, CONFIG_INT,
++		(void**)&global_slapdFrontendConfig.ndn_cache_enabled, CONFIG_ON_OFF,
+ 		(ConfigGetFunc)config_get_ndn_cache_enabled},
+ 	{CONFIG_NDN_CACHE_SIZE, config_set_ndn_cache_max_size,
+ 		NULL, 0,
+-- 
+1.9.3
+

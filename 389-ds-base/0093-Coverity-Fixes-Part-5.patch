@@ -1,0 +1,282 @@
+From dd6f95cfdb5d95d6a2abba57082ef94206abab37 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Thu, 6 Jun 2013 11:28:07 -0400
+Subject: [PATCH 93/99] Coverity Fixes (Part 5)
+
+11784 - Deference before null check (uiduniq/uid.c)
+11785 - Deference before null check (conntable.c)
+11786 - Deference before null check (opshared.c)
+11787 - Deference before null check (tools/dbscan.c)
+11788 - Deference before null check (tools/dbscan.c)
+11789 - Deference before null check (tools/dbscan.c)
+11790 - Allocation size mismatch (idl.c)
+11791 - Allocation size mismatch (idl.c)
+11792 - Wrong sizeof argument (dna.c)
+11793 - Stray semicolon (lib/base/util.c)
+11794 - Stray semicolon (lib/base/util.c)
+11795 - Destination buffer too small (log.c)
+11809 - Use after free (repl5_mtnode_ext.c)
+11849 - Unitialized sclara variable (dblayer.c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=970221
+
+Reviewed by: richm(Thanks!!)
+(cherry picked from commit 6d23891a44fd41aa0580cdc223667f0ca2b9e1cc)
+(cherry picked from commit 9ac276a838636326811284a28695c0fdea4a8d03)
+---
+ ldap/servers/plugins/dna/dna.c                     |  2 +-
+ .../servers/plugins/replication/repl5_mtnode_ext.c |  6 ++-
+ ldap/servers/plugins/uiduniq/uid.c                 |  2 +-
+ ldap/servers/slapd/back-ldbm/idl.c                 |  4 +-
+ ldap/servers/slapd/conntable.c                     |  4 +-
+ ldap/servers/slapd/log.c                           | 54 +++++++++++-----------
+ ldap/servers/slapd/opshared.c                      |  4 +-
+ ldap/servers/slapd/tools/dbscan.c                  | 15 +++---
+ lib/base/util.cpp                                  |  2 +-
+ 9 files changed, 44 insertions(+), 49 deletions(-)
+
+diff --git a/ldap/servers/plugins/dna/dna.c b/ldap/servers/plugins/dna/dna.c
+index 958a4a7..f7e1004 100644
+--- a/ldap/servers/plugins/dna/dna.c
++++ b/ldap/servers/plugins/dna/dna.c
+@@ -1865,7 +1865,7 @@ dna_first_free_value(struct configEntry *config_entry,
+     } else {
+         /* This is a single-type range, so just use the first (only)
+          * type from the list. */
+-        ctrls = (LDAPControl **)slapi_ch_calloc(2, sizeof(LDAPControl));
++        ctrls = (LDAPControl **)slapi_ch_calloc(2, sizeof(LDAPControl *));
+         if (NULL == ctrls)
+             return LDAP_OPERATIONS_ERROR;
+ 
+diff --git a/ldap/servers/plugins/replication/repl5_mtnode_ext.c b/ldap/servers/plugins/replication/repl5_mtnode_ext.c
+index dd0d261..9b61920 100644
+--- a/ldap/servers/plugins/replication/repl5_mtnode_ext.c
++++ b/ldap/servers/plugins/replication/repl5_mtnode_ext.c
+@@ -110,8 +110,10 @@ multimaster_mtnode_construct_replicas ()
+             ext->replica = object_new(r, replica_destroy);
+             if (replica_add_by_name (replica_get_name (r), ext->replica) != 0)
+             {
+-                object_release (ext->replica);    
+-                ext->replica = NULL;
++                if(ext->replica){
++                    object_release (ext->replica);
++                    ext->replica = NULL;
++                }
+             }
+         }
+ 	}
+diff --git a/ldap/servers/plugins/uiduniq/uid.c b/ldap/servers/plugins/uiduniq/uid.c
+index d9e6ba4..984b93e 100644
+--- a/ldap/servers/plugins/uiduniq/uid.c
++++ b/ldap/servers/plugins/uiduniq/uid.c
+@@ -509,7 +509,7 @@ findSubtreeAndSearch(Slapi_DN *parentDN, const char *attrName, Slapi_Attr *attr,
+   Slapi_DN *newpar = NULL;
+ 
+   slapi_sdn_get_parent(parentDN, curpar);
+-  while ((curpar != NULL) && (slapi_sdn_get_dn(curpar) != NULL))
++  while (slapi_sdn_get_dn(curpar) != NULL)
+   {
+         if ((spb = dnHasObjectClass(curpar, markerObjectClass)))
+         {
+diff --git a/ldap/servers/slapd/back-ldbm/idl.c b/ldap/servers/slapd/back-ldbm/idl.c
+index 58736f8..76ee252 100644
+--- a/ldap/servers/slapd/back-ldbm/idl.c
++++ b/ldap/servers/slapd/back-ldbm/idl.c
+@@ -1247,7 +1247,7 @@ void idl_insert(IDList **idl, ID id)
+         (*idl)->b_nmax *= 2;
+ 
+         (*idl) = (IDList *) slapi_ch_realloc( (char *) (*idl),
+-                                            ((*idl)->b_nmax + 2) * sizeof(ID) );
++                                            ((*idl)->b_nmax + 2) * sizeof(ID) + sizeof(IDList) );
+     }
+ 
+     /* make a slot for the new id */
+@@ -1345,7 +1345,7 @@ idl_insert_maxids( IDList **idl, ID id, int maxids )
+ 			(*idl)->b_nmax = maxids;
+ 		}
+ 		*idl = (IDList *) slapi_ch_realloc( (char *) *idl,
+-		    ((*idl)->b_nmax + 2) * sizeof(ID) );
++		    ((*idl)->b_nmax + 2) * sizeof(ID) + sizeof(IDList));
+ 	}
+ 
+ 	/* make a slot for the new id */
+diff --git a/ldap/servers/slapd/conntable.c b/ldap/servers/slapd/conntable.c
+index df4f2f8..7cf9f31 100644
+--- a/ldap/servers/slapd/conntable.c
++++ b/ldap/servers/slapd/conntable.c
+@@ -444,9 +444,7 @@ connection_table_as_entry(Connection_Table *ct, Slapi_Entry *e)
+ 			val.bv_val = bufptr;
+ 			val.bv_len = strlen( bufptr );
+ 			attrlist_merge( &e->e_attrs, "connection", vals );
+-			if (newbuf) {
+-				slapi_ch_free_string(&newbuf);
+-			}
++			slapi_ch_free_string(&newbuf);
+ 		}
+ 		PR_Unlock( ct->c[i].c_mutex );
+ 	}
+diff --git a/ldap/servers/slapd/log.c b/ldap/servers/slapd/log.c
+index 72a918b..c6131fb 100644
+--- a/ldap/servers/slapd/log.c
++++ b/ldap/servers/slapd/log.c
+@@ -2058,7 +2058,7 @@ static int vslapd_log_access(char *fmt, va_list ap)
+     int		blen, vlen;
+     /* info needed to keep us from calling localtime/strftime so often: */
+     static time_t	old_time = 0;
+-    static char		old_tbuf[TBUFSIZE];
++    static char		old_tbuf[SLAPI_LOG_BUFSIZ];
+ 	static int old_blen = 0;
+ 
+     tnl = current_time();
+@@ -2066,11 +2066,11 @@ static int vslapd_log_access(char *fmt, va_list ap)
+     /* check if we can use the old strftime buffer */
+     PR_Lock(ts_time_lock);
+     if (tnl == old_time) {
+-	strcpy(buffer, old_tbuf);
+-	blen = old_blen;
+-	PR_Unlock(ts_time_lock);
++        strcpy(buffer, old_tbuf);
++        blen = old_blen;
++        PR_Unlock(ts_time_lock);
+     } else {
+-	/* nope... painstakingly create the new strftime buffer */
++    /* nope... painstakingly create the new strftime buffer */
+ #ifdef _WIN32
+         {
+             struct tm *pt = localtime( &tnl );
+@@ -2078,39 +2078,39 @@ static int vslapd_log_access(char *fmt, va_list ap)
+             memcpy(&tms, pt, sizeof(struct tm) );
+         }
+ #else
+-	(void)localtime_r( &tnl, &tms );
+-	tmsp = &tms;
++        (void)localtime_r( &tnl, &tms );
++        tmsp = &tms;
+ #endif
+ 
+ #ifdef BSD_TIME
+-	tz = tmsp->tm_gmtoff;
++        tz = tmsp->tm_gmtoff;
+ #else /* BSD_TIME */
+-	tz = - timezone;
+-	if ( tmsp->tm_isdst ) {
+-	    tz += 3600;
+-	}
++        tz = - timezone;
++        if ( tmsp->tm_isdst ) {
++            tz += 3600;
++	    }
+ #endif /* BSD_TIME */
+-	sign = ( tz >= 0 ? '+' : '-' );
+-	if ( tz < 0 ) {
+-	    tz = -tz;
+-	}
+-	(void)strftime( tbuf, (size_t)TBUFSIZE, "%d/%b/%Y:%H:%M:%S", tmsp);
+-	sprintf( buffer, "[%s %c%02d%02d] ", tbuf, sign, 
+-		 (int)( tz / 3600 ), (int)( tz % 3600));
+-	old_time = tnl;
+-	strcpy(old_tbuf, buffer);
+-	blen = strlen(buffer);
+-	old_blen = blen;
+-	PR_Unlock(ts_time_lock);
++        sign = ( tz >= 0 ? '+' : '-' );
++        if ( tz < 0 ) {
++            tz = -tz;
++        }
++        (void)strftime( tbuf, (size_t)TBUFSIZE, "%d/%b/%Y:%H:%M:%S", tmsp);
++        sprintf( buffer, "[%s %c%02d%02d] ", tbuf, sign,
++                (int)( tz / 3600 ), (int)( tz % 3600));
++        old_time = tnl;
++        strcpy(old_tbuf, buffer);
++        blen = strlen(buffer);
++        old_blen = blen;
++        PR_Unlock(ts_time_lock);
+     }
+ 
+-	vlen = PR_vsnprintf(vbuf, SLAPI_LOG_BUFSIZ, fmt, ap);
++    vlen = PR_vsnprintf(vbuf, SLAPI_LOG_BUFSIZ, fmt, ap);
+     if (! vlen) {
+-		return -1;
++        return -1;
+     }
+     
+     if (SLAPI_LOG_BUFSIZ - blen < vlen) {
+-		return -1;
++        return -1;
+     }
+ 
+     log_append_buffer2(tnl, loginfo.log_access_buffer, buffer, blen, vbuf, vlen);    
+diff --git a/ldap/servers/slapd/opshared.c b/ldap/servers/slapd/opshared.c
+index a96b950..1689283 100644
+--- a/ldap/servers/slapd/opshared.c
++++ b/ldap/servers/slapd/opshared.c
+@@ -1090,9 +1090,7 @@ process_entry(Slapi_PBlock *pb, Slapi_Entry *e, int send_result)
+                 ber_bvecfree(refscopy);
+                 refscopy = NULL;
+             }
+-            if( NULL != tmpUrls) {
+-                slapi_ch_free( (void **)&tmpUrls );
+-            }
++            slapi_ch_free( (void **)&tmpUrls );
+         }
+ 
+         return 1;        /* done with this entry */
+diff --git a/ldap/servers/slapd/tools/dbscan.c b/ldap/servers/slapd/tools/dbscan.c
+index 6b0f525..d84f138 100644
+--- a/ldap/servers/slapd/tools/dbscan.c
++++ b/ldap/servers/slapd/tools/dbscan.c
+@@ -825,10 +825,9 @@ display_entryrdn_self(DB *db, ID id, const char *nrdn, int indent)
+     display_entryrdn_children(db, id_stored_to_internal(elem->rdn_elem_id),
+                               elem->rdn_elem_nrdn_rdn, indent);
+ bail:
+-    if (keybuf) {
+-        free(keybuf);
+-    }
++    free(keybuf);
+     cursor->c_close(cursor);
++
+     return;
+ }
+ 
+@@ -866,10 +865,9 @@ display_entryrdn_parent(DB *db, ID id, const char *nrdn, int indent)
+     elem = (rdn_elem *)data.data;
+     _entryrdn_dump_rdn_elem(keybuf, elem, indent);
+ bail:
+-    if (keybuf) {
+-        free(keybuf);
+-    }
++    free(keybuf);
+     cursor->c_close(cursor);
++
+     return;
+ }
+ 
+@@ -939,10 +937,9 @@ display_entryrdn_children(DB *db, ID id, const char *nrdn, int indent)
+         }
+     }
+ bail:
+-    if (keybuf) {
+-        free(keybuf);
+-    }
++    free(keybuf);
+     cursor->c_close(cursor);
++
+     return;
+ }
+ 
+diff --git a/lib/base/util.cpp b/lib/base/util.cpp
+index b198154..01f916d 100644
+--- a/lib/base/util.cpp
++++ b/lib/base/util.cpp
+@@ -253,7 +253,7 @@ static char *Bfmt[] = {
+ 
+ static void _util_strftime_conv(char *, int, int, char);
+ 
+-#define _util_strftime_add(str) for (;(*pt = *str++); pt++);
++#define _util_strftime_add(str) for (;(*pt = *str++); pt++)
+ #define _util_strftime_copy(str, len) memcpy(pt, str, len); pt += len;
+ #define _util_strftime_fmt util_strftime
+ 
+-- 
+1.8.1.4
+

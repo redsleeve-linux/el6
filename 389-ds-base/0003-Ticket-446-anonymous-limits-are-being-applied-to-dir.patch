@@ -1,0 +1,55 @@
+From 3e9a21ae4e41f1680fc899795f272f80c2d9aef9 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 9 Oct 2012 12:59:48 -0400
+Subject: [PATCH 3/5] Ticket #446 - anonymous limits are being applied to
+ directory manager
+
+Bug Description:  If you set "anonymous limits" they are incorrectly applied
+                  to the root DN
+
+Fix Description:  When a connection is first accepted we set the anonymous limits
+                  before we process the bind, because there might not be a bind operation.
+                  However, we fail to clear out the resouce limits if the bind DN is
+                  the root dn.
+
+https://fedorahosted.org/389/ticket/446
+
+Reviewed by:  richm(Thanks!)
+(cherry picked from commit 53e16eda8e2a82a45deb39129bbe839beb036c70)
+---
+ ldap/servers/slapd/pblock.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/slapd/pblock.c b/ldap/servers/slapd/pblock.c
+index baee7a7..33559a7 100644
+--- a/ldap/servers/slapd/pblock.c
++++ b/ldap/servers/slapd/pblock.c
+@@ -3639,7 +3639,7 @@ bind_credentials_set_nolock( Connection *conn, char *authtype, char *normdn,
+ {
+ 	/* clear credentials */
+ 	bind_credentials_clear( conn, PR_FALSE /* conn is already locked */,
+-			( extauthtype != NULL ) /* clear external creds. if requested */ );
++		( extauthtype != NULL ) /* clear external creds. if requested */ );
+ 
+ 	/* set primary credentials */
+ 	slapi_ch_free((void**)&conn->c_authtype);
+@@ -3657,7 +3657,6 @@ bind_credentials_set_nolock( Connection *conn, char *authtype, char *normdn,
+ 		conn->c_client_cert = clientcert;
+ 	}
+ 
+-
+ 	/* notify binder-based resource limit subsystem about the change in DN */
+ 	if ( !conn->c_isroot )
+ 	{
+@@ -3681,5 +3680,8 @@ bind_credentials_set_nolock( Connection *conn, char *authtype, char *normdn,
+ 
+ 			slapi_ch_free_string( &anon_dn );
+ 		}
++	} else {
++		/* For root dn clear about the resource limits */
++		reslimit_update_from_entry( conn, NULL );
+ 	}
+ }
+-- 
+1.7.7.6
+

@@ -1,0 +1,46 @@
+From d13b461fd160535b1a074651158c7dc95e2ae1ab Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Sat, 9 May 2015 18:55:39 -0700
+Subject: [PATCH 326/327] Ticket #48183 - bind on db chained to AD returns
+ err=32
+
+Description by rmeggins@redhat.com: bind is doing a search for the entry
+post bind, which fails because we don't enable password policy chaining
+by default. I think in this case, we should not look up password policy,
+because if the remote is AD or some other non-389 server, we can't use
+the password policy information. We should instead rely on the remote
+server to evaluate the password policy.
+
+The commit 4fc53e1a63222d0ff67c30a59f2cff4b535f90a8 introduced the bug.
+Ticket #47748 - Simultaneous adding a user and binding as the user could
+                fail in the password policy check
+
+https://fedorahosted.org/389/ticket/48183
+
+Revewed by nhosoi@redhat.com.
+
+(cherry picked from commit eb46e6f1975b19956bb38d5e070e6eb5159200b4)
+(cherry picked from commit 03bee0a0d4dbe313bca88cfafc605f6cb01b9fdc)
+(cherry picked from commit 46242d88b62716d99641eceac26476a9c842c149)
+(cherry picked from commit 164cb2460538d63ee2b2cde3e28323e51dc9741c)
+---
+ ldap/servers/slapd/bind.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/bind.c b/ldap/servers/slapd/bind.c
+index edb36c4..11ec22e 100644
+--- a/ldap/servers/slapd/bind.c
++++ b/ldap/servers/slapd/bind.c
+@@ -777,7 +777,8 @@ do_bind( Slapi_PBlock *pb )
+                          * was in be_bind.  Since be_bind returned SLAPI_BIND_SUCCESS,
+                          * the entry is in the DS.  So, we need to retrieve it once more.
+                          */
+-                        if (!bind_target_entry) {
++                        if (!slapi_be_is_flag_set(be, SLAPI_BE_FLAG_REMOTE_DATA) && 
++                            !bind_target_entry) {
+                             bind_target_entry = get_entry(pb, slapi_sdn_get_ndn(sdn));
+                             if (bind_target_entry) {
+                                 myrc = slapi_check_account_lock(pb, bind_target_entry,
+-- 
+1.9.3
+

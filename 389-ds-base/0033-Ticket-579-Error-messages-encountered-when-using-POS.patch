@@ -1,0 +1,68 @@
+From 1e2d920b07f0726c67b0f1543f1a378a6aa8c15a Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@totoro.usersys.redhat.com>
+Date: Mon, 11 Feb 2013 14:49:14 -0800
+Subject: [PATCH 33/33] Ticket #579 - Error messages encountered when using
+ POSIX winsync
+
+Bug description: posix_group_fix_memberuid_callback registered by
+posixWinsyncCreateMemberOfTask calls an internal modify function
+even if there are no attributes to fix up.  The attempt fails as
+expected, but it logs cryptic errors in the error log:
+  - slapi_modify_internal_set_pb: NULL parameter
+  - allow_operation: component identity is NULL
+
+Fix description: This patch skips calling the fix up internal
+modify if there is no attributes to fix up.
+
+https://fedorahosted.org/389/ticket/579
+
+Reviewed by Rich (Thank you!!)
+(cherry picked from commit 74423d2eaef50949fd96ded8a2251834663e95e8)
+---
+ .../plugins/posix-winsync/posix-group-task.c       |   21 +++++++++++--------
+ 1 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/ldap/servers/plugins/posix-winsync/posix-group-task.c b/ldap/servers/plugins/posix-winsync/posix-group-task.c
+index 92ac342..1d9135d 100644
+--- a/ldap/servers/plugins/posix-winsync/posix-group-task.c
++++ b/ldap/servers/plugins/posix-winsync/posix-group-task.c
+@@ -250,6 +250,7 @@ posix_group_fix_memberuid_callback(Slapi_Entry *e, void *callback_data)
+ 
+     char *dn = slapi_entry_get_dn(e);
+     Slapi_DN *sdn = slapi_entry_get_sdn(e);
++    LDAPMod **mods = NULL;
+ 
+ /* Clean out memberuids and dsonlymemberuids without a valid referant */
+     rc = slapi_entry_attr_find(e, "memberuid", &muid_attr);
+@@ -380,17 +381,19 @@ posix_group_fix_memberuid_callback(Slapi_Entry *e, void *callback_data)
+         }
+     }
+ 
+-    Slapi_PBlock *mod_pb = slapi_pblock_new();
++    mods = slapi_mods_get_ldapmods_passout(smods);
++    if (mods) {
++        Slapi_PBlock *mod_pb = NULL;
++        mod_pb = slapi_pblock_new();
++        slapi_modify_internal_set_pb_ext(mod_pb, sdn, mods, 0, 0,
++                                        posix_winsync_get_plugin_identity(), 0);
+ 
+-    slapi_modify_internal_set_pb_ext(mod_pb, sdn, slapi_mods_get_ldapmods_passout(smods), 0, 0,
+-                                     posix_winsync_get_plugin_identity(), 0);
+-
+-    slapi_pblock_set(mod_pb, SLAPI_TXN, the_cb_data->txn);
+-    slapi_modify_internal_pb(mod_pb);
+-
+-    slapi_pblock_get(mod_pb, SLAPI_PLUGIN_INTOP_RESULT, &rc);
+-    slapi_pblock_destroy(mod_pb);
++        slapi_pblock_set(mod_pb, SLAPI_TXN, the_cb_data->txn);
++        slapi_modify_internal_pb(mod_pb);
+ 
++        slapi_pblock_get(mod_pb, SLAPI_PLUGIN_INTOP_RESULT, &rc);
++        slapi_pblock_destroy(mod_pb);
++    }
+     slapi_mods_free(&smods);
+ 
+     slapi_log_error(SLAPI_LOG_PLUGIN, POSIX_WINSYNC_PLUGIN_NAME,
+-- 
+1.7.7.6
+

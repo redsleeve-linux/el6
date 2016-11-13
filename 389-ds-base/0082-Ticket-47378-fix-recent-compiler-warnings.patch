@@ -1,0 +1,713 @@
+From 45a86b895601644b624d27484933735d7e665a66 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Wed, 5 Jun 2013 11:30:13 -0600
+Subject: [PATCH 82/99] Ticket #47378 - fix recent compiler warnings
+
+https://fedorahosted.org/389/ticket/47378
+Reviewed by: nhosoi (Thanks!)
+Branch: master
+Fix Description: Fix the various compiler warnings as reported by
+http://jenkins.cloud.fedoraproject.org/job/389-ds-base/ws/build-warns.1370449480.txt
+In addition, fixed a bug in the slapi_re_subs_ext - if there was an
+ampersand that did not need to be replaced, that is, if the ampersand
+was part of an LDAP search filter, it was replaced with a '('.  Also, an
+ampersand preceeded by an open parenthesis and followed by a non-open
+parenthesis is supposed to be replaced in the string, but this was not
+working.
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: no
+(cherry picked from commit 0dc230b007dc3ad292961f378421b03736b68f9e)
+(cherry picked from commit 79739bdfba251ed6445ae4a16e90a471ca3f7b94)
+---
+ .../plugins/acct_usability/acct_usability.c        |  2 +-
+ ldap/servers/plugins/acl/acl_ext.c                 |  2 +-
+ ldap/servers/plugins/acl/aclutil.c                 |  3 ++-
+ ldap/servers/plugins/automember/automember.c       |  3 ++-
+ ldap/servers/plugins/deref/deref.c                 |  2 +-
+ ldap/servers/plugins/http/http_impl.c              |  4 ++--
+ ldap/servers/plugins/pam_passthru/pam_ptimpl.c     |  2 +-
+ ldap/servers/plugins/referint/referint.c           |  2 +-
+ ldap/servers/plugins/replication/cl5_api.c         | 20 +++++++++---------
+ .../plugins/replication/windows_inc_protocol.c     |  2 +-
+ ldap/servers/plugins/replication/windows_private.c |  9 ++++++--
+ ldap/servers/plugins/usn/usn.c                     |  4 ++--
+ ldap/servers/slapd/back-ldbm/import-threads.c      |  2 +-
+ ldap/servers/slapd/back-ldbm/monitor.c             | 18 ++++++++--------
+ ldap/servers/slapd/log.c                           | 24 ++++++++++++++--------
+ ldap/servers/slapd/mapping_tree.c                  |  6 +++++-
+ ldap/servers/slapd/regex.c                         | 10 ++++++---
+ ldap/servers/slapd/slapi-plugin.h                  |  9 ++++++++
+ ldap/servers/slapd/tools/ldclt/ldapfct.c           |  5 -----
+ ldap/servers/slapd/tools/rsearch/infadd.c          |  7 +++----
+ ldap/servers/snmp/main.c                           | 13 +++++++++++-
+ lib/libaccess/acltools.cpp                         |  2 +-
+ lib/libaccess/register.cpp                         | 10 +++++----
+ 23 files changed, 100 insertions(+), 61 deletions(-)
+
+diff --git a/ldap/servers/plugins/acct_usability/acct_usability.c b/ldap/servers/plugins/acct_usability/acct_usability.c
+index 19e55c3..f41f934 100644
+--- a/ldap/servers/plugins/acct_usability/acct_usability.c
++++ b/ldap/servers/plugins/acct_usability/acct_usability.c
+@@ -312,7 +312,7 @@ auc_pre_search(Slapi_PBlock *pb)
+     int ldapcode = LDAP_SUCCESS;
+     const LDAPControl **reqctrls = NULL;
+     const LDAPControl *aucctrl = NULL;
+-    const char *ldaperrtext;
++    const char *ldaperrtext = "Unknown error";
+     const char *incompatible = NULL;
+     int isroot = 0;
+     int ii;
+diff --git a/ldap/servers/plugins/acl/acl_ext.c b/ldap/servers/plugins/acl/acl_ext.c
+index f8699b4..e42a7e2 100644
+--- a/ldap/servers/plugins/acl/acl_ext.c
++++ b/ldap/servers/plugins/acl/acl_ext.c
+@@ -128,7 +128,7 @@ acl_get_ext (ext_type type, void *object)
+ void
+ acl_set_ext (ext_type type, void *object, void *data)
+ {
+-	if ( type >= 0 && type < ACL_EXT_ALL )
++	if ( type < ACL_EXT_ALL )
+ 	{
+ 		struct acl_ext ext = acl_ext_list [type];
+ 		slapi_set_object_extension ( ext.object_type, object, ext.handle, data );
+diff --git a/ldap/servers/plugins/acl/aclutil.c b/ldap/servers/plugins/acl/aclutil.c
+index 77ec35f..2002276 100644
+--- a/ldap/servers/plugins/acl/aclutil.c
++++ b/ldap/servers/plugins/acl/aclutil.c
+@@ -96,6 +96,7 @@ aclutil_str_append_ext(char **dest, size_t *dlen, const char *src, size_t slen)
+     char *ptr = NULL;
+     int rc = 0;
+ 
++    PR_ASSERT(NULL != dlen);
+     if ( dest == NULL || src == NULL ) {
+         return rc;    
+     }
+@@ -103,7 +104,7 @@ aclutil_str_append_ext(char **dest, size_t *dlen, const char *src, size_t slen)
+     if (0 == slen) {
+         slen = strlen(src);
+     }
+-    if (*dest && dlen > 0) {
++    if (*dest && *dlen > 0) {
+         size_t dest_strlen = strlen(*dest);
+         size_t new_len = dest_strlen + slen + 1;
+         if (new_len > *dlen) {
+diff --git a/ldap/servers/plugins/automember/automember.c b/ldap/servers/plugins/automember/automember.c
+index 424b507..49f47f7 100644
+--- a/ldap/servers/plugins/automember/automember.c
++++ b/ldap/servers/plugins/automember/automember.c
+@@ -2522,10 +2522,11 @@ void automember_map_task_thread(void *arg){
+ #if defined(USE_OPENLDAP)
+     int buflen = 0;
+     LDIFFP *ldif_fd_in = NULL;
++    ldif_record_lineno_t lineno = 0;
+ #else
+     PRFileDesc *ldif_fd_in = NULL;
+-#endif
+     int lineno = 0;
++#endif
+     int rc = 0;
+ 
+     td = (task_data *)slapi_task_get_data(task);
+diff --git a/ldap/servers/plugins/deref/deref.c b/ldap/servers/plugins/deref/deref.c
+index 51394c8..6e4d4ec 100644
+--- a/ldap/servers/plugins/deref/deref.c
++++ b/ldap/servers/plugins/deref/deref.c
+@@ -440,7 +440,7 @@ deref_pre_search(Slapi_PBlock *pb)
+     int ldapcode = LDAP_SUCCESS;
+     const LDAPControl **reqctrls = NULL;
+     const LDAPControl *derefctrl = NULL;
+-    const char *ldaperrtext;
++    const char *ldaperrtext = "Unknown error";
+     const char *incompatible = NULL;
+     DerefSpecList *speclist = NULL;
+     int ii;
+diff --git a/ldap/servers/plugins/http/http_impl.c b/ldap/servers/plugins/http/http_impl.c
+index f96d75a..db02b67 100644
+--- a/ldap/servers/plugins/http/http_impl.c
++++ b/ldap/servers/plugins/http/http_impl.c
+@@ -260,7 +260,7 @@ static int doRequest(const char *url, httpheader **httpheaderArray, char *body,
+ 	PRInt32 port;
+ 	PRInt32 errcode = 0;
+ 	PRInt32 http_connection_time_out = 0;
+-	PRInt32 sslOn;
++	PRInt32 sslOn = 0;
+ 	
+ 	LDAPDebug( LDAP_DEBUG_PLUGIN, "--> doRequest -- BEGIN\n",0,0,0);
+ 
+@@ -1178,7 +1178,7 @@ SECStatus
+                     struct SECKEYPrivateKeyStr **pRetKey)
+ {
+     CERTCertificate *  cert;
+-    SECKEYPrivateKey * privKey;
++    SECKEYPrivateKey * privKey = NULL;
+     char *             chosenNickName = (char *)arg;
+     void *             proto_win      = NULL;
+     SECStatus          secStatus      = SECFailure;
+diff --git a/ldap/servers/plugins/pam_passthru/pam_ptimpl.c b/ldap/servers/plugins/pam_passthru/pam_ptimpl.c
+index 69c08e8..2558b9e 100644
+--- a/ldap/servers/plugins/pam_passthru/pam_ptimpl.c
++++ b/ldap/servers/plugins/pam_passthru/pam_ptimpl.c
+@@ -263,7 +263,7 @@ do_one_pam_auth(
+ 	MyStrBuf pam_id;
+ 	const char *binddn = NULL;
+ 	Slapi_DN *bindsdn = NULL;
+-	int rc;
++	int rc = PAM_SUCCESS;
+ 	int retcode = LDAP_SUCCESS;
+ 	pam_handle_t *pam_handle;
+ 	struct my_pam_conv_str my_data;
+diff --git a/ldap/servers/plugins/referint/referint.c b/ldap/servers/plugins/referint/referint.c
+index 8f751da..4a722c1 100644
+--- a/ldap/servers/plugins/referint/referint.c
++++ b/ldap/servers/plugins/referint/referint.c
+@@ -896,7 +896,7 @@ void
+ referint_thread_func(void *arg)
+ {
+     char **plugin_argv = (char **)arg;
+-    PRFileDesc *prfd;
++    PRFileDesc *prfd = NULL;
+     char *logfilename;
+     char thisline[MAX_LINE];
+     int delay;
+diff --git a/ldap/servers/plugins/replication/cl5_api.c b/ldap/servers/plugins/replication/cl5_api.c
+index e24cead..a06c43f 100644
+--- a/ldap/servers/plugins/replication/cl5_api.c
++++ b/ldap/servers/plugins/replication/cl5_api.c
+@@ -271,8 +271,8 @@ static CL5Desc s_cl5Desc;
+ 
+ /* changelog initialization and cleanup */
+ static int _cl5Open (const char *dir, const CL5DBConfig *config, CL5OpenMode openMode);
+-static int _cl5AppInit (PRBool *didRecovery);
+-static int _cl5DBOpen ();
++static int _cl5AppInit (void);
++static int _cl5DBOpen (void);
+ static void _cl5SetDefaultDBConfig ();
+ static void _cl5SetDBConfig (const CL5DBConfig *config);
+ static int _cl5CheckDBVersion ();
+@@ -876,12 +876,13 @@ cl5ImportLDIF (const char *clDir, const char *ldifFile, Object **replicas)
+ #if defined(USE_OPENLDAP)
+ 	LDIFFP *file = NULL;
+ 	int buflen;
++	ldif_record_lineno_t lineno = 0;
+ #else
+ 	FILE *file = NULL;
++	int lineno = 0;
+ #endif
+ 	int rc;
+ 	char *buff = NULL;
+-	int lineno = 0;
+ 	slapi_operation_parameters op;
+ 	Object *prim_replica_obj = NULL;
+ 	Object *replica_obj = NULL;
+@@ -1850,7 +1851,6 @@ int cl5GetOperationCount (Object *replica)
+ static int _cl5Open (const char *dir, const CL5DBConfig *config, CL5OpenMode openMode)
+ {
+ 	int rc;
+-	PRBool didRecovery;
+ 
+ 	PR_ASSERT (dir);
+ 
+@@ -1898,7 +1898,7 @@ static int _cl5Open (const char *dir, const CL5DBConfig *config, CL5OpenMode ope
+ 	s_cl5Desc.dbOpenMode = openMode;
+ 
+ 	/* initialize db environment */
+-	rc = _cl5AppInit (&didRecovery);
++	rc = _cl5AppInit ();
+ 	if (rc != CL5_SUCCESS)
+ 	{
+ 		slapi_log_error(SLAPI_LOG_REPL, repl_plugin_name_cl, 
+@@ -1913,7 +1913,7 @@ static int _cl5Open (const char *dir, const CL5DBConfig *config, CL5OpenMode ope
+ 	}
+ 
+ 	/* open database files */
+-	rc = _cl5DBOpen (!didRecovery);
++	rc = _cl5DBOpen ();
+ 	if (rc != CL5_SUCCESS)
+ 	{
+ 		slapi_log_error(SLAPI_LOG_REPL, repl_plugin_name_cl, 
+@@ -1989,7 +1989,7 @@ int cl5CreateDirIfNeeded (const char *dirName)
+ 	return CL5_SUCCESS;
+ }
+ 
+-static int _cl5AppInit (PRBool *didRecovery)
++static int _cl5AppInit (void)
+ {
+ 	int rc = -1; /* initialize to failure */
+ 	DB_ENV *dbEnv = NULL;
+@@ -2853,7 +2853,7 @@ static int _cl5Upgrade3_4(char *fromVersion, char *toVersion)
+ 	backup = s_cl5Desc.dbOpenMode;
+ 	s_cl5Desc.dbOpenMode = CL5_OPEN_CLEAN_RECOVER;
+ 	/* CL5_OPEN_CLEAN_RECOVER does 1 and 2 */
+-	rc = _cl5AppInit (NULL);
++	rc = _cl5AppInit ();
+ 	if (rc != CL5_SUCCESS)
+ 	{
+ 		slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name_cl, 
+@@ -2943,7 +2943,7 @@ static int _cl5Upgrade4_4(char *fromVersion, char *toVersion)
+ 	backup = s_cl5Desc.dbOpenMode;
+ 	s_cl5Desc.dbOpenMode = CL5_OPEN_CLEAN_RECOVER;
+ 	/* CL5_OPEN_CLEAN_RECOVER does 1 and 2 */
+-	rc = _cl5AppInit (NULL);
++	rc = _cl5AppInit ();
+ 	if (rc != CL5_SUCCESS)
+ 	{
+ 		slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name_cl, 
+@@ -4208,7 +4208,7 @@ static int _cl5Operation2LDIF (const slapi_operation_parameters *op, const char
+ 	int len = 2;
+ 	lenstr *l = NULL;
+ 	const char *strType;
+-	char *strDeleteOldRDN;
++	const char *strDeleteOldRDN = "false";
+ 	char *buff, *start;
+ 	LDAPMod **add_mods;
+ 	char *rawDN = NULL;
+diff --git a/ldap/servers/plugins/replication/windows_inc_protocol.c b/ldap/servers/plugins/replication/windows_inc_protocol.c
+index b5fcadc..cb3b3d2 100644
+--- a/ldap/servers/plugins/replication/windows_inc_protocol.c
++++ b/ldap/servers/plugins/replication/windows_inc_protocol.c
+@@ -1175,7 +1175,7 @@ send_updates(Private_Repl_Protocol *prp, RUV *remote_update_vector, PRUint32 *nu
+ {
+ 	CL5Entry entry;
+ 	slapi_operation_parameters op;
+-	int return_value;
++	int return_value = UPDATE_NO_MORE_UPDATES;
+ 	int rc;
+ 	int set_mincsn = 0;
+ 	CL5ReplayIterator *changelog_iterator = NULL;
+diff --git a/ldap/servers/plugins/replication/windows_private.c b/ldap/servers/plugins/replication/windows_private.c
+index 20360a3..a103cad 100644
+--- a/ldap/servers/plugins/replication/windows_private.c
++++ b/ldap/servers/plugins/replication/windows_private.c
+@@ -1344,11 +1344,16 @@ windows_plugin_init(Repl_Agmt *ra)
+ {
+     struct winsync_plugin_cookie *list = NULL;
+     void *cookie = NULL;
+-    PRStatus rv;
+ 
+     LDAPDebug0Args( LDAP_DEBUG_PLUGIN, "--> windows_plugin_init_start -- begin\n");
+ 
+-    rv = PR_CallOnce(&winsync_callOnce, windows_plugin_callonce);
++    if (PR_CallOnce(&winsync_callOnce, windows_plugin_callonce)) {
++	    PRErrorCode prerr = PR_GetError();
++	    slapi_log_error(SLAPI_LOG_FATAL, "windows_plugin_init",
++		    	    "cannot initialize plugin: %d:%s\n", prerr,
++		    	    slapi_pr_strerror(prerr));
++	    return;
++    }
+ 
+     /* call each plugin init function in turn - store the returned cookie
+        indexed by the api */
+diff --git a/ldap/servers/plugins/usn/usn.c b/ldap/servers/plugins/usn/usn.c
+index 0273fd1..4473618 100644
+--- a/ldap/servers/plugins/usn/usn.c
++++ b/ldap/servers/plugins/usn/usn.c
+@@ -673,7 +673,7 @@ usn_rootdse_search(Slapi_PBlock *pb, Slapi_Entry* e, Slapi_Entry* entryAfter,
+         if (be && be->be_usn_counter) {
+             /* get a next USN counter from be_usn_counter; 
+              * then minus 1 from it */
+-            PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRI64 "d",
++            PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRIu64,
+                                 slapi_counter_get_value(be->be_usn_counter)-1);
+             usn_berval.bv_len = strlen(usn_berval.bv_val);
+             slapi_entry_attr_replace(e, attr, vals);
+@@ -692,7 +692,7 @@ usn_rootdse_search(Slapi_PBlock *pb, Slapi_Entry* e, Slapi_Entry* entryAfter,
+             }
+             /* get a next USN counter from be_usn_counter; 
+              * then minus 1 from it */
+-            PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRI64 "d",
++            PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRIu64,
+                                 slapi_counter_get_value(be->be_usn_counter)-1);
+             usn_berval.bv_len = strlen(usn_berval.bv_val);
+     
+diff --git a/ldap/servers/slapd/back-ldbm/import-threads.c b/ldap/servers/slapd/back-ldbm/import-threads.c
+index b85f073..5667acb 100644
+--- a/ldap/servers/slapd/back-ldbm/import-threads.c
++++ b/ldap/servers/slapd/back-ldbm/import-threads.c
+@@ -3622,7 +3622,7 @@ _get_import_entryusn(ImportJob *job, Slapi_Value **usn_value)
+              * Use the counter which stores the old DB's
+              * next entryusn. */
+             PR_snprintf(counter_buf, USN_COUNTER_BUF_LEN,
+-                        "%" NSPRI64 "d",
++                        "%" NSPRIu64,
+                         slapi_counter_get_value(be->be_usn_counter));
+         } else {
+             /* import_init value is digit.
+diff --git a/ldap/servers/slapd/back-ldbm/monitor.c b/ldap/servers/slapd/back-ldbm/monitor.c
+index 075a48f..e3e1fb5 100644
+--- a/ldap/servers/slapd/back-ldbm/monitor.c
++++ b/ldap/servers/slapd/back-ldbm/monitor.c
+@@ -214,13 +214,13 @@ int ldbm_back_monitor_instance_search(Slapi_PBlock *pb, Slapi_Entry *e,
+ #endif
+         MSETF("dbFilename-%d", i);
+         
+-        sprintf(buf, "%u", mpfstat[i]->st_cache_hit);
++        sprintf(buf, "%lu", (unsigned long)mpfstat[i]->st_cache_hit);
+         MSETF("dbFileCacheHit-%d", i);
+-        sprintf(buf, "%u", mpfstat[i]->st_cache_miss);
++        sprintf(buf, "%lu", (unsigned long)mpfstat[i]->st_cache_miss);
+         MSETF("dbFileCacheMiss-%d", i);
+-        sprintf(buf, "%u", mpfstat[i]->st_page_in);
++        sprintf(buf, "%lu", (unsigned long)mpfstat[i]->st_page_in);
+         MSETF("dbFilePageIn-%d", i);
+-        sprintf(buf, "%u", mpfstat[i]->st_page_out);
++        sprintf(buf, "%lu", (unsigned long)mpfstat[i]->st_page_out);
+         MSETF("dbFilePageOut-%d", i);
+ 
+ 	slapi_ch_free_string(&absolute_pathname);
+@@ -267,7 +267,7 @@ int ldbm_back_monitor_search(Slapi_PBlock *pb, Slapi_Entry *e,
+     }
+ 
+     /* cache hits*/
+-    sprintf(buf, "%u", mpstat->st_cache_hit);
++    sprintf(buf, "%lu", (unsigned long)mpstat->st_cache_hit);
+     MSET("dbCacheHits");
+ 
+     /* cache tries*/
+@@ -279,13 +279,13 @@ int ldbm_back_monitor_search(Slapi_PBlock *pb, Slapi_Entry *e,
+     sprintf(buf, "%lu", (unsigned long)(100.0 * (double)mpstat->st_cache_hit / (double)(cache_tries > 0 ? cache_tries : 1) ));
+     MSET("dbCacheHitRatio");
+ 
+-    sprintf(buf, "%u", mpstat->st_page_in);
++    sprintf(buf, "%lu", (unsigned long)mpstat->st_page_in);
+     MSET("dbCachePageIn");
+-    sprintf(buf, "%u", mpstat->st_page_out);
++    sprintf(buf, "%lu", (unsigned long)mpstat->st_page_out);
+     MSET("dbCachePageOut");
+-    sprintf(buf, "%u", mpstat->st_ro_evict);
++    sprintf(buf, "%lu", (unsigned long)mpstat->st_ro_evict);
+     MSET("dbCacheROEvict");
+-    sprintf(buf, "%u", mpstat->st_rw_evict);
++    sprintf(buf, "%lu", (unsigned long)mpstat->st_rw_evict);
+     MSET("dbCacheRWEvict");
+ 
+     slapi_ch_free((void **)&mpstat);
+diff --git a/ldap/servers/slapd/log.c b/ldap/servers/slapd/log.c
+index e65b247..a765001 100644
+--- a/ldap/servers/slapd/log.c
++++ b/ldap/servers/slapd/log.c
+@@ -207,6 +207,15 @@ slapd_log_error_proc_internal(
+ 	/* Should be a flush in here ?? Yes because PR_SYNC doesn't work ! */ \
+ 	PR_Sync(fd); \
+ 	} while (0)
++#define LOG_WRITE_NOW_NO_ERR(fd, buffer, size, headersize) do {\
++	if ( slapi_write_buffer((fd), (buffer), (size)) != (size) ) \
++	{ \
++		PRErrorCode prerr = PR_GetError(); \
++		syslog(LOG_ERR, "Failed to write log, " SLAPI_COMPONENT_NAME_NSPR " error %d (%s): %s\n", prerr, slapd_pr_strerror(prerr), (buffer)+(headersize) ); \
++	} \
++	/* Should be a flush in here ?? Yes because PR_SYNC doesn't work ! */ \
++	PR_Sync(fd); \
++	} while (0)
+ #define LOG_CLOSE(fd) \
+ 	PR_Close((fd))
+ #endif
+@@ -1279,7 +1288,7 @@ int
+ log_set_maxdiskspace(const char *attrname, char *maxdiskspace_str, int logtype, char *errorbuf, int apply)
+ {
+ 	int	rv = 0;
+-  	PRInt64	mlogsize;	  /* in bytes */
++  	PRInt64	mlogsize = 0;	  /* in bytes */
+ 	PRInt64 maxdiskspace; /* in bytes */
+ 	int	s_maxdiskspace;   /* in megabytes */
+   
+@@ -1520,7 +1529,7 @@ log_set_expirationtimeunit(const char *attrname, char *expunit, int logtype, cha
+ {
+ 	int	value = 0;
+ 	int	rv = 0;
+-	int	exptime, rsecs;
++	int	exptime = 0, rsecs = 0;
+ 	int	*exptimeunitp = NULL;
+ 	slapdFrontendConfig_t *fe_cfg = getFrontendConfig();
+ 
+@@ -1642,12 +1651,11 @@ log_write_title (LOGFD fp)
+ 	char *buildnum = config_get_buildnum();
+ 	char buff[512];
+ 	int bufflen = sizeof(buff);
+-	int err = 0;
+ 
+ 	PR_snprintf(buff, bufflen, "\t%s B%s\n",
+ 				fe_cfg->versionstring ? fe_cfg->versionstring : CAPBRAND "-Directory/" DS_PACKAGE_VERSION,
+ 				buildnum ? buildnum : "");
+-	LOG_WRITE_NOW(fp, buff, strlen(buff), 0, err);
++	LOG_WRITE_NOW_NO_ERR(fp, buff, strlen(buff), 0);
+ 
+ 	if (fe_cfg->localhost) {
+ 		PR_snprintf(buff, bufflen, "\t%s:%d (%s)\n\n",
+@@ -1662,7 +1670,7 @@ log_write_title (LOGFD fp)
+ 		PR_snprintf(buff, bufflen, "\t<host>:<port> (%s)\n\n",
+ 				fe_cfg->configdir ? fe_cfg->configdir : "");
+ 	}
+-	LOG_WRITE_NOW(fp, buff, strlen(buff), 0, err);
++	LOG_WRITE_NOW_NO_ERR(fp, buff, strlen(buff), 0);
+ 	slapi_ch_free((void **)&buildnum);
+ }
+ 
+@@ -1768,7 +1776,7 @@ slapd_log_audit_proc (
+ 			log_write_title( loginfo.log_audit_fdes);
+ 			loginfo.log_audit_state &= ~LOGGING_NEED_TITLE;
+ 		}
+-	    LOG_WRITE_NOW(loginfo.log_audit_fdes, buffer, buf_len, 0, err);
++	    LOG_WRITE_NOW_NO_ERR(loginfo.log_audit_fdes, buffer, buf_len, 0);
+    		LOG_AUDIT_UNLOCK_WRITE();
+ 	    return 0;
+ 	}
+@@ -4185,8 +4193,8 @@ static void log_flush_buffer(LogBufferInfo *lbi, int type, int sync_now)
+ 		if (!sync_now && slapdFrontendConfig->accesslogbuffering) {
+ 			LOG_WRITE(loginfo.log_access_fdes, lbi->top, lbi->current - lbi->top, 0);
+ 		} else {
+-			LOG_WRITE_NOW(loginfo.log_access_fdes, lbi->top,
+-								lbi->current - lbi->top, 0, err);
++			LOG_WRITE_NOW_NO_ERR(loginfo.log_access_fdes, lbi->top,
++								lbi->current - lbi->top, 0);
+ 		}
+ 
+         lbi->current = lbi->top;
+diff --git a/ldap/servers/slapd/mapping_tree.c b/ldap/servers/slapd/mapping_tree.c
+index da8e4f3..19c5708 100644
+--- a/ldap/servers/slapd/mapping_tree.c
++++ b/ldap/servers/slapd/mapping_tree.c
+@@ -158,8 +158,10 @@ static mapping_tree_node *
+ static int _mtn_update_config_param(int op, char *type, char *strvalue);
+ 
+ #ifdef DEBUG
++#ifdef USE_DUMP_MAPPING_TREE
+ static void dump_mapping_tree(mapping_tree_node *parent, int depth);
+ #endif
++#endif
+ 
+ /* structure and static local variable used to store the
+  * list of plugins that have registered to a callback when backend state
+@@ -3721,6 +3723,7 @@ void test_register()
+ #endif
+ 
+ #ifdef DEBUG
++#ifdef USE_DUMP_MAPPING_TREE
+ static void dump_mapping_tree(mapping_tree_node *parent, int depth)
+ {
+     mapping_tree_node *current = NULL;
+@@ -3751,7 +3754,8 @@ static void dump_mapping_tree(mapping_tree_node *parent, int depth)
+     }
+     return;
+ }
+-#endif
++#endif /* USE_DUMP_MAPPING_TREE */
++#endif /* DEBUG */
+ 
+ /* helper function to set/remove the config param in cn=config */
+ static int
+diff --git a/ldap/servers/slapd/regex.c b/ldap/servers/slapd/regex.c
+index 3697fde..29edffe 100644
+--- a/ldap/servers/slapd/regex.c
++++ b/ldap/servers/slapd/regex.c
+@@ -161,7 +161,7 @@ slapi_re_subs_ext( Slapi_Regex *re_handle, const char *subject,
+     int  pin;
+     int  *ovector;
+     char *mydst;
+-    const char *prev, *next;
++    const char *prev;
+     const char *substring_start;
+     const char *p;
+ 
+@@ -179,8 +179,7 @@ slapi_re_subs_ext( Slapi_Regex *re_handle, const char *subject,
+     for (p = src; *p != '\0'; p++) {
+         if ('&' == *p) {
+             /* Don't replace '&' if it's a filter AND: "(&(cn=a)(sn=b))"  */
+-            next = p;
+-            if(!filter || (*prev != '(' && *next++ != '(')){
++            if(!filter || !(*prev == '(' && *(p+1) == '(')){
+                 if (re_handle->re_oveccount <= 1) {
+                     memset(*dst, '\0', dstlen);
+                     return -1;
+@@ -188,6 +187,11 @@ slapi_re_subs_ext( Slapi_Regex *re_handle, const char *subject,
+                 substring_start = subject + ovector[0];
+                 thislen = ovector[1] - ovector[0];
+                 len += thislen;
++            } else { /* is a filter AND clause */
++                /* just copy it into the filter */
++                substring_start = p;
++                thislen = 1;
++                len++;
+             }
+         } else if (('\\' == *p) && ('0' <= *(p+1) && *(p+1) <= '9')) {
+             pin = *(++p) - '0';
+diff --git a/ldap/servers/slapd/slapi-plugin.h b/ldap/servers/slapd/slapi-plugin.h
+index 5b3e1ab..0fdb206 100644
+--- a/ldap/servers/slapd/slapi-plugin.h
++++ b/ldap/servers/slapd/slapi-plugin.h
+@@ -6870,6 +6870,15 @@ int slapi_ldap_get_lderrno(LDAP *ld, char **m, char **s);
+ #endif
+ void slapi_ldif_put_type_and_value_with_options( char **out, const char *t, const char *val, int vlen, unsigned long options );
+ 
++/* ldif_read_record lineno argument type depends on openldap version */
++#if defined(USE_OPENLDAP)
++#if LDAP_VENDOR_VERSION >= 20434 /* changed in 2.4.34 */
++typedef unsigned long int ldif_record_lineno_t;
++#else
++typedef int ldif_record_lineno_t;
++#endif
++#endif
++
+ #if defined(USE_OPENLDAP)
+ /*
+  * UTF-8 routines (should these move into libnls?)
+diff --git a/ldap/servers/slapd/tools/ldclt/ldapfct.c b/ldap/servers/slapd/tools/ldclt/ldapfct.c
+index 3f74fd0..b177d7c 100644
+--- a/ldap/servers/slapd/tools/ldclt/ldapfct.c
++++ b/ldap/servers/slapd/tools/ldclt/ldapfct.c
+@@ -732,10 +732,8 @@ LDAP *
+ connectToLDAP(thread_context *tttctx, const char *bufBindDN, const char *bufPasswd, unsigned int mode, unsigned int mod2)
+ {
+   LDAP *ld = NULL;
+-  const char *mech = LDAP_SASL_SIMPLE;
+   struct berval cred = {0, NULL};
+   int v2v3 = LDAP_VERSION3;
+-  const char *binddn = NULL;
+   const char *passwd = NULL;
+ #if defined(USE_OPENLDAP)
+   char *ldapurl = NULL;
+@@ -863,11 +861,8 @@ connectToLDAP(thread_context *tttctx, const char *bufBindDN, const char *bufPass
+ #endif /* !USE_OPENLDAP */
+ 
+   if (mode & CLTAUTH) {
+-    mech = "EXTERNAL";
+-    binddn = "";
+     passwd = NULL;
+   } else {
+-    binddn = bufBindDN?bufBindDN:mctx.bindDN;
+     passwd = bufPasswd?bufPasswd:mctx.passwd;
+     if (passwd) {
+       cred.bv_val = (char *)passwd;
+diff --git a/ldap/servers/slapd/tools/rsearch/infadd.c b/ldap/servers/slapd/tools/rsearch/infadd.c
+index 607381a..4a9f2e9 100644
+--- a/ldap/servers/slapd/tools/rsearch/infadd.c
++++ b/ldap/servers/slapd/tools/rsearch/infadd.c
+@@ -127,11 +127,10 @@ char *randName(void)
+     return x;
+ }
+ 
+-int fill_table(NameTable *nt, PRUint32 size)
++void fill_table(NameTable *nt, PRUint32 size)
+ {
+     PRUint32 i;
+     char *x;
+-    int ret;
+ 
+     fprintf(stdout, "Generating random names: 0      ");
+     for (i = 0; i < size; i++) {
+@@ -141,13 +140,13 @@ int fill_table(NameTable *nt, PRUint32 size)
+ 	    free(x);
+ 	    x = randName();
+ 	}
+-	ret = nt_push(nt, x);
++	(void)nt_push(nt, x);
+ 	if ((i % 100) == 0) {
+ 	    fprintf(stdout, "\b\b\b\b\b\b\b%-7d", i);
+ 	}
+     }
+     fprintf(stdout, "\b\b\b\b\b\b\b%d.  Done.\n", size);
+-    return ret;
++    return;
+ }
+ 
+ int main(int argc, char **argv)
+diff --git a/ldap/servers/snmp/main.c b/ldap/servers/snmp/main.c
+index 53af972..0d1fb25 100644
+--- a/ldap/servers/snmp/main.c
++++ b/ldap/servers/snmp/main.c
+@@ -236,6 +236,15 @@ main (int argc, char *argv[]) {
+     return 0;
+ }
+ 
++/* ldif_read_record lineno argument type depends on openldap version */
++#if defined(USE_OPENLDAP)
++#if LDAP_VENDOR_VERSION >= 20434 /* changed in 2.4.34 */
++typedef unsigned long int ldif_record_lineno_t;
++#else
++typedef int ldif_record_lineno_t;
++#endif
++#endif
++
+ /************************************************************************
+  * load_config
+  *
+@@ -249,8 +258,10 @@ load_config(char *conf_path)
+ #if defined(USE_OPENLDAP)
+     LDIFFP *dse_fp = NULL;
+     int buflen = 0;
++    ldif_record_lineno_t lineno = 0;
+ #else
+     FILE *dse_fp = NULL;
++    int lineno = 0;
+ #endif
+     char line[MAXLINE];
+     char *p = NULL;
+@@ -329,10 +340,10 @@ load_config(char *conf_path)
+         } else if ((p = strstr(line, "server")) != NULL) {
+             int got_port = 0;
+             int got_rundir = 0;
+-            int lineno = 0;
+             char *entry = NULL;
+             char *instancename = NULL;
+ 
++            lineno = 0;
+             /* Allocate a server_instance */
+             if ((serv_p = malloc(sizeof(server_instance))) == NULL) {
+                 printf("ldap-agent: malloc error processing config file\n");
+diff --git a/lib/libaccess/acltools.cpp b/lib/libaccess/acltools.cpp
+index df08658..4c1d28c 100644
+--- a/lib/libaccess/acltools.cpp
++++ b/lib/libaccess/acltools.cpp
+@@ -1741,7 +1741,7 @@ static PList_t ACLAttr2IndexPList = NULL;
+ int
+ ACL_InitAttr2Index(void)
+ {
+-    int i;
++    intptr_t i;
+ 
+     if (ACLAttr2IndexPList) return 0;
+ 
+diff --git a/lib/libaccess/register.cpp b/lib/libaccess/register.cpp
+index 3f2acc5..595c1f2 100644
+--- a/lib/libaccess/register.cpp
++++ b/lib/libaccess/register.cpp
+@@ -77,6 +77,8 @@ ACL_LasHashInit()
+ {
+     int	i;
+ 
++    (void)(link_ACLGlobal); /* get rid of defined but not used compiler warning */
++    (void)(link_nsacl_table); /* get rid of defined but not used compiler warning */
+     ACLLasEvalHash = PR_NewHashTable(0,
+ 				     PR_HashString,
+ 				     PR_CompareStrings,
+@@ -268,11 +270,11 @@ ACL_MethodRegister(NSErr_t *errp, const char *name, ACLMethod_t *t)
+     }
+ 	
+     /*  Put it in the hash table  */
+-    if (NULL == PR_HashTableAdd(ACLMethodHash, name, (void *)++cur_method)) {
++    if (NULL == PR_HashTableAdd(ACLMethodHash, name, (void *)(intptr_t)++cur_method)) {
+         ACL_CritExit();
+         return -1;
+     }
+-    *t = (ACLMethod_t) cur_method;
++    *t = (ACLMethod_t) (intptr_t)cur_method;
+ 
+     ACL_CritExit();
+     return 0;
+@@ -412,11 +414,11 @@ ACL_DbTypeRegister(NSErr_t *errp, const char *name, DbParseFn_t func, ACLDbType_
+     }
+ 	
+     /*  Put it in the hash table  */
+-    if (NULL == PR_HashTableAdd(ACLDbTypeHash, name, (void *)++cur_dbtype)) {
++    if (NULL == PR_HashTableAdd(ACLDbTypeHash, name, (void *)(intptr_t)++cur_dbtype)) {
+         ACL_CritExit();
+         return -1;
+     }
+-    *t = (ACLDbType_t) cur_dbtype;
++    *t = (ACLDbType_t) (intptr_t)cur_dbtype;
+     ACLDbParseFnTable[cur_dbtype] = func;
+ 
+     ACL_CritExit();
+-- 
+1.8.1.4
+

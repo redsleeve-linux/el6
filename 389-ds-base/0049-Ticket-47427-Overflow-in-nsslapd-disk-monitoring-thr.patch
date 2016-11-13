@@ -1,0 +1,36 @@
+From 5c8353f8d66177dbfee234a04a147ec60cbbdb8b Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Thu, 25 Jul 2013 17:27:16 -0400
+Subject: [PATCH 49/99] Ticket 47427 - Overflow in
+ nsslapd-disk-monitoring-threshold
+
+    Bug Description:  If you directory try and set the threshold to -2,
+                      the server allows it, but it should be rejected.
+
+    Fix Description:  Use a signed int when parsing the value.
+
+    https://fedorahosted.org/389/ticket/47427
+    https://bugzilla.redhat.com/show_bug.cgi?id=984970
+
+    Reviewed by: richm(Thanks!)
+(cherry picked from commit 920bb3f883b5e678ab95fd8e9bcf25e92dbb7e84)
+---
+ ldap/servers/slapd/libglobs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index 0dc4cf5..cf1f73e 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -1228,7 +1228,7 @@ config_set_disk_threshold( const char *attrname, char *value, char *errorbuf, in
+ {
+     slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+     int retVal = LDAP_SUCCESS;
+-    PRUint64 threshold = 0;
++    PRInt64 threshold = 0;
+     char *endp = NULL;
+ 
+     if ( config_value_is_null( attrname, value, errorbuf, 0 )) {
+-- 
+1.8.1.4
+

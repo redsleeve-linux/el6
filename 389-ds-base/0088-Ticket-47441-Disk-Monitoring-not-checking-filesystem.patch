@@ -1,0 +1,52 @@
+From 1d7b8e00c8798ecfdc378f4297e958b9400c9234 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Mon, 22 Jul 2013 15:36:49 -0400
+Subject: [PATCH 88/99] Ticket 47441 - Disk Monitoring not checking filesystem
+ with logs
+
+Bug Description:  If logging is not set to critical, then the log directories
+                  are not checked for available diskspace.
+
+Fix Description:  Remove the "logging_critical" check, and always include the
+                  log directories.
+
+https://fedorahosted.org/389/ticket/47441
+
+Reviewed by: richm(Thanks!)
+(cherry picked from commit 0ac4187eb5e1d4551a955196e649aca47aa3ea1a)
+---
+ ldap/servers/slapd/daemon.c | 11 +++--------
+ 1 file changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index 8f147f1..221b156 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -600,14 +600,6 @@ disk_mon_get_dirs(char ***list, int logs_critical){
+     char *cookie = NULL;
+     char *dir = NULL;
+ 
+-    if(logs_critical){
+-        slapi_rwlock_rdlock(config->cfg_rwlock);
+-        disk_mon_add_dir(list, config->accesslog);
+-        disk_mon_add_dir(list, config->errorlog);
+-        disk_mon_add_dir(list, config->auditlog);
+-        slapi_rwlock_unlock(config->cfg_rwlock);
+-    }
+-
+     /* Add /var just to be safe */
+ #ifdef LOCALSTATEDIR
+     disk_mon_add_dir(list, LOCALSTATEDIR);
+@@ -618,6 +610,9 @@ disk_mon_get_dirs(char ***list, int logs_critical){
+     /* config and backend directories */
+     slapi_rwlock_rdlock(config->cfg_rwlock);
+     disk_mon_add_dir(list, config->configdir);
++    disk_mon_add_dir(list, config->accesslog);
++    disk_mon_add_dir(list, config->errorlog);
++    disk_mon_add_dir(list, config->auditlog);
+     slapi_rwlock_unlock(config->cfg_rwlock);
+ 
+     be = slapi_get_first_backend (&cookie);
+-- 
+1.8.1.4
+

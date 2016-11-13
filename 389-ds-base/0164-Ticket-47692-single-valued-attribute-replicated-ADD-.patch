@@ -1,0 +1,68 @@
+From a9af6ebde8c9c16bdb46fb398e83a3273701e435 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Fri, 7 Feb 2014 16:02:37 -0700
+Subject: [PATCH 164/225] Ticket #47692 single valued attribute replicated ADD
+ does not work
+
+https://fedorahosted.org/389/ticket/47692
+Reviewed by: nhosoi,lkrispenz (Thanks!)
+Branch: 389-ds-base-1.2.11
+Fix Description: Add special corner case handling for the case where
+- attr is deleted with vdcsn and adcsn CSN1
+- attr vucsn is NULL
+- incoming mod/add has CSN2 where CSN2 > CSN1
+in this case, just keep the new mod/add value as the present value.
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: no
+(cherry picked from commit 59941ea23b6f288617ba1e6ce58238fa59266c9f)
+(cherry picked from commit 01a112121e80505021d0a18afa899b5c46180797)
+(cherry picked from commit a4a46424d59a189552c1d17eed1d52218f3a95b8)
+(cherry picked from commit dad08c10826896dc4e8772ec400d60e3eb0ebbb6)
+(cherry picked from commit 86fb13764f4dda2efc8b869377b2e90314466362)
+---
+ ldap/servers/slapd/entrywsi.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/ldap/servers/slapd/entrywsi.c b/ldap/servers/slapd/entrywsi.c
+index 6c37f45..cca615d 100644
+--- a/ldap/servers/slapd/entrywsi.c
++++ b/ldap/servers/slapd/entrywsi.c
+@@ -1148,6 +1148,34 @@ resolve_attribute_state_single_valued(Slapi_Entry *e, Slapi_Attr *a, int attribu
+ 		entry_deleted_value_to_zapped_value(a,pending_value);
+ 		pending_value = NULL;
+ 	}
++	else if (current_value && pending_value && !new_value && adcsn &&
++			 (attribute_state == ATTRIBUTE_DELETED) &&
++			 current_value_vucsn && !pending_value_vucsn && pending_value_vdcsn &&
++			 (csn_compare(current_value_vucsn, pending_value_vdcsn) > 0) &&
++			 (csn_compare(adcsn, pending_value_vdcsn) == 0))
++	{
++		/* in the case of the following:
++		 * beginning attr state is a deleted value
++		 * incoming operation is
++		 * add: newvalue
++		 * attribute_state is ATTRIBUTE_DELETED
++		 * so we have both a current_value and a pending_value
++		 * new_value is NULL
++		 * current_value_vucsn is CSN1
++		 * pending_value_vucsn is NULL
++		 * pending_value_vdcsn is CSN2
++		 * adcsn is CSN2 == pending_value_vdcsn
++		 * CSN1 > CSN2
++		 * since the pending_value is deleted, and the current_value has
++		 * a greater CSN, we should keep the current_value and zap
++		 * the pending_value
++		 */
++		/* just remove the deleted value */
++		entry_deleted_value_to_zapped_value(a,pending_value);
++		pending_value = NULL;
++		attr_set_deletion_csn(a,NULL);
++		return; /* we are done - we are keeping the present value */
++	}
+ 	else if(new_value==NULL)
+ 	{
+ 		/* check if the pending value should become the current value */
+-- 
+1.8.1.4
+

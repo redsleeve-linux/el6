@@ -1,0 +1,55 @@
+From ac1436918cafec17f453c36ad9890a2b3c72daef Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Tue, 24 Sep 2013 08:18:57 -0600
+Subject: [PATCH 119/225] Ticket #47504 idlistscanlimit per index/type/value
+
+https://fedorahosted.org/389/ticket/47504
+Reviewed by: nhosoi (Thanks!)
+Branch: master
+Fix Description: Fix compiler warning - use bv.bv_val to print syntax
+errors in substring filter.
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: no
+(cherry picked from commit 36f506d05fb940e56c42a6b966f11ad1fdf8cba6)
+(cherry picked from commit e95d7d6bd893d777c88be1bd847996f299621d99)
+(cherry picked from commit 527c3e49ed14bc585f29ed873e71c6f551ad193b)
+(cherry picked from commit d83311ad26de153270ef8e7297f7b1790bd58868)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_attr.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_attr.c b/ldap/servers/slapd/back-ldbm/ldbm_attr.c
+index 9a930bc..fa18550 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_attr.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_attr.c
+@@ -273,7 +273,7 @@ attr_index_parse_idlistsize_values(Slapi_Attr *attr, struct index_idlistsizeinfo
+ 						PR_snprintf(returntext, SLAPI_DSE_RETURNTEXT_SIZE,
+ 						            "attr_index_parse_idlistsize: initial substring value %s "
+ 						            "in value %s violates syntax for attribute %s",
+-						            filt->f_sub_initial, val, attr->a_type);
++						            bv.bv_val, val, attr->a_type);
+ 						break;
+ 					}
+ 				}
+@@ -287,7 +287,7 @@ attr_index_parse_idlistsize_values(Slapi_Attr *attr, struct index_idlistsizeinfo
+ 							PR_snprintf(returntext, SLAPI_DSE_RETURNTEXT_SIZE,
+ 								    "attr_index_parse_idlistsize: initial substring value %s in "
+ 								    "value %s violates syntax for attribute %s",
+-								    filt->f_sub_any[ii], val, attr->a_type);
++								    bv.bv_val, val, attr->a_type);
+ 							break;
+ 						}
+ 					}
+@@ -303,7 +303,7 @@ attr_index_parse_idlistsize_values(Slapi_Attr *attr, struct index_idlistsizeinfo
+ 						PR_snprintf(returntext, SLAPI_DSE_RETURNTEXT_SIZE,
+ 							    "attr_index_parse_idlistsize: final substring value %s in value "
+ 							    "%s violates syntax for attribute %s",
+-							    filt->f_sub_final, val, attr->a_type);
++							    bv.bv_val, val, attr->a_type);
+ 						break;
+ 					}
+ 				}
+-- 
+1.8.1.4
+

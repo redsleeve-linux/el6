@@ -1,0 +1,48 @@
+From 099becdc1261561631ae3eb1ba6c0663bc919da2 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Wed, 31 Jul 2013 09:53:03 -0600
+Subject: [PATCH 72/99] Fix compiler warnings for Ticket 47395 and 47397
+
+Ticket 47395 47397 v2 correct behaviour of account policy if only stateattr
+    is configured or no alternate attr is configured
+(cherry picked from commit ce4e813f3f446bdd746ec288f33d1effcb3bf919)
+(cherry picked from commit 2bd9ced46f395513e0aaded8f8eea5962337bffc)
+(cherry picked from commit 12d47a25879456f8527505ded5a001f68302a877)
+---
+ ldap/servers/plugins/acctpolicy/acct_util.c  | 4 ++++
+ ldap/servers/plugins/acctpolicy/acctpolicy.h | 4 ----
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/ldap/servers/plugins/acctpolicy/acct_util.c b/ldap/servers/plugins/acctpolicy/acct_util.c
+index a02382f..850cc42 100644
+--- a/ldap/servers/plugins/acctpolicy/acct_util.c
++++ b/ldap/servers/plugins/acctpolicy/acct_util.c
+@@ -29,6 +29,10 @@ Hewlett-Packard Development Company, L.P.
+ /* Globals */
+ static void* plugin_id = NULL;
+ 
++/* attributes that no clients are allowed to add or modify */
++static char *protected_attrs_login_recording [] = { "createTimestamp",
++                                        NULL };
++
+ /*
+    Checks whether an entry has a particular attribute type, and optionally
+    returns the value.  Only for use with single-valued attributes - it returns
+diff --git a/ldap/servers/plugins/acctpolicy/acctpolicy.h b/ldap/servers/plugins/acctpolicy/acctpolicy.h
+index 78412cd..5c202d3 100644
+--- a/ldap/servers/plugins/acctpolicy/acctpolicy.h
++++ b/ldap/servers/plugins/acctpolicy/acctpolicy.h
+@@ -35,10 +35,6 @@ Hewlett-Packard Development Company, L.P.
+ #define DEFAULT_INACT_LIMIT_ATTR "accountInactivityLimit"
+ #define DEFAULT_RECORD_LOGIN 1
+ 
+-/* attributes that no clients are allowed to add or modify */
+-static char *protected_attrs_login_recording [] = { "createTimestamp",
+-                                        NULL };
+-
+ #define PLUGIN_VENDOR "Hewlett-Packard Company"
+ #define PLUGIN_VERSION "1.0"
+ #define PLUGIN_CONFIG_DN "cn=config,cn=Account Policy Plugin,cn=plugins,cn=config"
+-- 
+1.8.1.4
+

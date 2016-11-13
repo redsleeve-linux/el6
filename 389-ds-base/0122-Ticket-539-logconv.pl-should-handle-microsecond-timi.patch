@@ -1,0 +1,107 @@
+From 7dee79c02350007ea22b8e1898035682395d3314 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 8 Jan 2013 12:16:14 -0500
+Subject: [PATCH 122/225] Ticket 539 - logconv.pl should handle microsecond
+ timing
+
+Bug Description:  logconv.pl can not handle microsecond etimes
+
+Fix Description:  Update the regular expressions to handle the decimal point "."
+
+                  Also did a little code cleanup.
+
+https://fedorahosted.org/389/ticket/539
+
+Reviewed by: nhosoi(Thanks!)
+(cherry picked from commit 8965dda8d4023ab36f0a404a874c657d78631e9d)
+(cherry picked from commit 67c5f1cd1584cd352da7b8db2520c268431d7812)
+(cherry picked from commit 6775316c1eae432c7b40fd6418f4f9993152b59b)
+---
+ ldap/admin/src/logconv.pl | 55 +++++++++++++++++++++--------------------------
+ 1 file changed, 25 insertions(+), 30 deletions(-)
+
+diff --git a/ldap/admin/src/logconv.pl b/ldap/admin/src/logconv.pl
+index 94ba036..f5342af 100755
+--- a/ldap/admin/src/logconv.pl
++++ b/ldap/admin/src/logconv.pl
+@@ -948,36 +948,31 @@ if ($filter_count > 0){
+ #                                       # 
+ #########################################
+ 
+-
+-#
+-# print most often etimes
+-#
+-
+ if ($usage =~ /t/i || $verb eq "yes"){
+-print "\n\n----- Top $sizeCount Most Frequent etimes -----\n\n";
+-$eloop = 0;
+-foreach $et (sort { $etime{$b} <=> $etime{$a} } keys %etime) {
+-        if ($eloop == $sizeCount) { last; }
+-	if ($retime ne "2"){
+-		$first = $et;
+-		$retime = "2";
++	#
++	# print most often etimes
++	#
++	print "\n\n----- Top $sizeCount Most Frequent etimes -----\n\n";
++	$eloop = 0;
++	foreach $et (sort { $etime{$b} <=> $etime{$a} } keys %etime) {
++		if ($eloop == $sizeCount) { last; }
++		if ($retime ne "2"){
++			$first = $et;
++			$retime = "2";
++		}
++		printf "%-8s        %-12s\n", $etime{ $et }, "etime=$et";
++		$eloop++;
+ 	}
+-        printf "%-8s        %-12s\n", $etime{ $et }, "etime=$et";
+-        $eloop++;
+-}
+-
+-#
+-# print longest etimes
+-#
+-
+-print "\n\n----- Top $sizeCount Longest etimes -----\n\n";
+-$eloop = 0;
+-foreach $et (sort { $b <=> $a } (keys %etime)) {
+-        if ($eloop == $sizeCount) { last; }
+-        printf "%-12s    %-10s\n","etime=$et",$etime{ $et };
+-        $eloop++;
+-}
+-        
++	#
++	# print longest etimes
++	#
++	print "\n\n----- Top $sizeCount Longest etimes -----\n\n";
++	$eloop = 0;
++	foreach $et (sort { $b <=> $a } (keys %etime)) {
++		if ($eloop == $sizeCount) { last; }
++		printf "%-12s    %-10s\n","etime=$et",$etime{ $et };
++		$eloop++;
++	}   
+ }
+ 
+ #######################################
+@@ -1651,7 +1646,7 @@ if (m/ notes=U/){
+         }
+         if ($usage =~ /u/ || $verb eq "yes"){
+         	if ($v eq "0" ){
+-                	if ($_ =~ /etime= *([0-9]+)/i ) {
++                	if ($_ =~ /etime= *([0-9.]+)/i ) {
+                         	$notesEtime[$vet]=$1;
+                         	$vet++;
+                 	}
+@@ -1931,7 +1926,7 @@ if ($_ =~ /err= *([0-9]+)/i){
+         if ($1 ne "0"){ $errorck++;}
+         else { $errorsucc++;}
+ }
+-if ($_ =~ /etime= *([0-9]+)/i ) { $etime{$1}++;}
++if ($_ =~ /etime= *([0-9.]+)/ ) { $etime{$1}++;}
+ if ($_ =~ / tag=101 nentries= *([0-9]+)/i ) {$nentries{$1}++}
+ if ($_ =~ / tag=111 nentries= *([0-9]+)/i ) {$nentries{$1}++}
+ if ($_ =~ / tag=100 nentries= *([0-9]+)/i ) {$nentries{$1}++}
+-- 
+1.8.1.4
+

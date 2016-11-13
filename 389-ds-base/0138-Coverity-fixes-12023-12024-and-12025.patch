@@ -1,0 +1,81 @@
+From 150020e636bb801fddf6bf4e9a71a6c27e8d9d07 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Mon, 30 Sep 2013 12:45:15 -0700
+Subject: [PATCH 138/225] Coverity fixes - 12023, 12024, and 12025
+
+. 12023 - Ignoring number of bytes read
+  basicInit (ldclt.c):
+  The return value from fread was ignored and not used for copying
+  the read content from buffer to mctx.attrplFileContent.
+. 12024 - Resource leak
+  roles_cache_create_object_from_entry (roles_cache.c):
+  When an error occurred, filter_attr_value was not freed.
+
+Reviewed by rmeggins (Thank you, Rich!!)
+(cherry picked from commit f702868012ac1f9deb1cb92d51cdfd793353e836)
+(cherry picked from commit 99f7b65e4bd35ce5d2c24a05178cfca4a44645db)
+(cherry picked from commit aa19f9ad2d2d1ee58fa2a0da3b6119a95ea47733)
+(cherry picked from commit 2d588df1ab832d5027719c25a4b2477de22b5839)
+---
+ ldap/servers/plugins/roles/roles_cache.c |  3 ++-
+ ldap/servers/slapd/tools/ldclt/ldclt.c   | 14 +++++++++-----
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/ldap/servers/plugins/roles/roles_cache.c b/ldap/servers/plugins/roles/roles_cache.c
+index 83d3292..32ebf74 100644
+--- a/ldap/servers/plugins/roles/roles_cache.c
++++ b/ldap/servers/plugins/roles/roles_cache.c
+@@ -1224,6 +1224,7 @@ static int roles_cache_create_object_from_entry(Slapi_Entry *role_entry, role_ob
+ 					    (char*)slapi_sdn_get_ndn(this_role->dn),
+ 					    ROLE_FILTER_ATTR_NAME, filter_attr_value,
+ 					    ROLE_FILTER_ATTR_NAME);
++					slapi_ch_free_string(&filter_attr_value);
+ 					slapi_ch_free((void**)&this_role);
+ 					return SLAPI_ROLE_ERROR_FILTER_BAD;
+ 				}
+@@ -1233,7 +1234,7 @@ static int roles_cache_create_object_from_entry(Slapi_Entry *role_entry, role_ob
+ 
+ 			/* Turn it into a slapi filter object */
+ 			filter = slapi_str2filter(filter_attr_value);
+-			slapi_ch_free((void**)&filter_attr_value);
++			slapi_ch_free_string(&filter_attr_value);
+ 
+ 			if ( filter == NULL ) 
+ 			{
+diff --git a/ldap/servers/slapd/tools/ldclt/ldclt.c b/ldap/servers/slapd/tools/ldclt/ldclt.c
+index 2a45c76..7d22c2d 100644
+--- a/ldap/servers/slapd/tools/ldclt/ldclt.c
++++ b/ldap/servers/slapd/tools/ldclt/ldclt.c
+@@ -1572,20 +1572,24 @@ basicInit (void)
+     /* start to read file content */
+     mctx.attrplFileContent = (char *)malloc(mctx.attrplFileSize + 1);    
+     i=0;
+-    while ( fread(buffer, BUFFERSIZE , 1, attrF) )
++    while ( (ret = fread(buffer, BUFFERSIZE , 1, attrF)) )
+     {
+-      memcpy(mctx.attrplFileContent+i, buffer , BUFFERSIZE );
+-      memset(buffer ,'\0', BUFFERSIZE );
+-      i = i + BUFFERSIZE;
++      memcpy(mctx.attrplFileContent+i, buffer , ret);
++      memset(buffer ,'\0', BUFFERSIZE);
++      i += ret;
+     } 
+     /* copy remainding content into mctx.attrplFileContent */
++    /* ??? 
++     * Why you need to copy buffer twice to fill the gap?
++     * Could there any chance (mctx.attrplFileSize - 1 - i) > BUFFERSIZE ?
++     */
+     if (i<mctx.attrplFileSize)
+     {
+       memcpy(mctx.attrplFileContent+i, buffer , (mctx.attrplFileSize - 1 - i));
+       memset(buffer ,'\0', BUFFERSIZE );  /* clear the buffer */
+     }
+ 
+-    mctx.attrplFileContent[mctx.attrplFileSize]='\0'; // append the close bit
++    mctx.attrplFileContent[mctx.attrplFileSize]='\0'; /* append the close bit */
+ 
+     if ((fclose(attrF)) == EOF )
+     {
+-- 
+1.8.1.4
+

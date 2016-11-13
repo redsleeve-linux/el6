@@ -1,0 +1,28 @@
+From 4c9e4082217eb20818b413413a8127d214e9b046 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 10 Jun 2014 14:59:10 -0400
+Subject: [PATCH 219/225] Ticket 47813 - remove "goto bail" from previous
+ commit
+
+https://fedorahosted.org/389/ticket/47813
+(cherry picked from commit 4cdd7fd6ad41ff5d92dfd452b6a7bef25462b643)
+(cherry picked from commit cb8471beba73926505151b388b0573872406a96f)
+---
+ ldap/servers/plugins/mep/mep.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/ldap/servers/plugins/mep/mep.c b/ldap/servers/plugins/mep/mep.c
+index dfff42b..70634c0 100644
+--- a/ldap/servers/plugins/mep/mep.c
++++ b/ldap/servers/plugins/mep/mep.c
+@@ -1492,7 +1492,6 @@ mep_add_managed_entry(struct configEntry *config,
+                                 "mep_add_managed_entry: Failed to add managed entry "
+                                 "objectclass in origin entry \"%s\", error (%s)\n",
+                                 slapi_entry_get_dn(origin), ldap_err2string(result));
+-                goto bail;
+             }
+             slapi_pblock_init(mod_pb);
+ 
+-- 
+1.8.1.4
+

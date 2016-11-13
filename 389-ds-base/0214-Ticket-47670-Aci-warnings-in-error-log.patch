@@ -1,0 +1,56 @@
+From cd7689ed869b91751f673b0bd1bdb800a6843c00 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Wed, 21 May 2014 14:36:01 -0400
+Subject: [PATCH 214/225] Ticket 47670 - Aci warnings in error log
+
+Bug Description:  Some aci warnings are unneccesarily written to the
+                  error log.
+
+Fix Description:  Lower the log messaages from SLAPI_LOG_FATAL to SLAPI_LOG_ACL
+
+Patch provided by: chatfield(Thanks!)
+
+https://fedorahosted.org/389/ticket/47670
+
+Reviewed by: nhosoi(Thanks!)
+
+(cherry picked from commit 4f14e7df8215e30d6dd1205638886a877f46a70c)
+(cherry picked from commit 7fbf16bdd9a45dcef00b8607474dfa21c645c2f7)
+---
+ ldap/servers/plugins/acl/acllas.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/servers/plugins/acl/acllas.c b/ldap/servers/plugins/acl/acllas.c
+index a71d04f..81e486f 100644
+--- a/ldap/servers/plugins/acl/acllas.c
++++ b/ldap/servers/plugins/acl/acllas.c
+@@ -3624,7 +3624,7 @@ acllas__client_match_URL (struct acl_pblock *aclpb, char *n_clientdn, char *url
+ 	/* Check the scope */
+ 	if ( ludp->lud_scope == LDAP_SCOPE_SUBTREE ) {
+ 		if (!slapi_dn_issuffix(n_clientdn, ludp->lud_dn)) {
+-			slapi_log_error( SLAPI_LOG_FATAL, plugin_name,
++			slapi_log_error( SLAPI_LOG_ACL, plugin_name,
+ 							 "acllas__client_match_URL: url [%s] scope is subtree but dn [%s] "
+ 							 "is not a suffix of [%s]\n",
+ 							 normed, ludp->lud_dn, n_clientdn );
+@@ -3634,7 +3634,7 @@ acllas__client_match_URL (struct acl_pblock *aclpb, char *n_clientdn, char *url
+ 		char    *parent = slapi_dn_parent (n_clientdn);
+ 
+ 		if (slapi_utf8casecmp ((ACLUCHP)parent, (ACLUCHP)ludp->lud_dn) != 0 ) {
+-			slapi_log_error( SLAPI_LOG_FATAL, plugin_name,
++			slapi_log_error( SLAPI_LOG_ACL, plugin_name,
+ 							 "acllas__client_match_URL: url [%s] scope is onelevel but dn [%s] "
+ 							 "is not a direct child of [%s]\n",
+ 							 normed, ludp->lud_dn, parent );
+@@ -3644,7 +3644,7 @@ acllas__client_match_URL (struct acl_pblock *aclpb, char *n_clientdn, char *url
+ 		slapi_ch_free_string(&parent);
+ 	} else  { /* default */
+ 		if (slapi_utf8casecmp ( (ACLUCHP)n_clientdn, (ACLUCHP)ludp->lud_dn) != 0 ) {
+-			slapi_log_error( SLAPI_LOG_FATAL, plugin_name,
++			slapi_log_error( SLAPI_LOG_ACL, plugin_name,
+ 							 "acllas__client_match_URL: url [%s] scope is base but dn [%s] "
+ 							 "does not match [%s]\n",
+ 							 normed, ludp->lud_dn, n_clientdn );
+-- 
+1.8.1.4
+

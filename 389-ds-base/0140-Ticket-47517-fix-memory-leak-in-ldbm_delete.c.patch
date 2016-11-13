@@ -1,0 +1,28 @@
+From 97b29320e0d72c9b02c6995f5adf4c85b2e839ba Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 8 Oct 2013 10:28:47 -0400
+Subject: [PATCH 140/225] Ticket 47517 - fix memory leak in ldbm_delete.c
+
+https://fedorahosted.org/389/ticket/47517
+
+reviewed by: nhosoi & richm(Thanks!)
+(cherry picked from commit 200b4e44230840a5dd970e0f6b404053545cb381)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_delete.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_delete.c b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+index a3dc17b..d1ad3ef 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_delete.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+@@ -336,6 +336,7 @@ ldbm_back_delete( Slapi_PBlock *pb )
+ 			 * and numsubordinate count could get confused.
+ 			 */
+ 			ID pid = (ID)strtol(pid_str, (char **)NULL, 10);
++			slapi_ch_free_string(&pid_str);
+ 			parent = id2entry(be, pid ,NULL, &retval);
+ 			if (parent && cache_lock_entry(&inst->inst_cache, parent)) {
+ 				/* Failed to obtain parent entry's entry lock */
+-- 
+1.8.1.4
+

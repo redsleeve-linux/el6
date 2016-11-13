@@ -1,0 +1,41 @@
+From a6b70cbf66aee7b34d4a3e4b28ca2c40c853f22e Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Wed, 20 Aug 2014 13:51:40 -0700
+Subject: [PATCH 254/255] Ticket #47875 - dirsrv not running with old openldap
+
+Description: Changing the function of AC_CHECK_LIB from ldif_open
+to _init so that regardless of the contents of the library, it's
+linked to the server if it exists.
+
+https://fedorahosted.org/389/ticket/47875
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+(cherry picked from commit 38c74d224c250abd907636f7d78e95775ebf63dd)
+(cherry picked from commit 4917a5e4856c7fe0fb4f9b023c21eb64f277e319)
+(cherry picked from commit 62ef849326a010e9a17c576817b0afc2830a8a6d)
+---
+ m4/openldap.m4 | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/m4/openldap.m4 b/m4/openldap.m4
+index 74700d7..1e297c4 100644
+--- a/m4/openldap.m4
++++ b/m4/openldap.m4
+@@ -146,8 +146,12 @@ if test "$with_openldap" = yes ; then
+   dnl ldif functionality into libldap
+   ldap_lib_ldif=""
+   LDFLAGS="$LDFLAGS"
+-  AC_CHECK_LIB([ldap$ol_libver], [ldif_open], [ldap_lib_ldif=],
+-               [ldap_lib_ldif=-lldif$ol_libver])
++  AC_CHECK_LIB([ldif$ol_libver], [_init], [ldap_lib_ldif=-lldif$ol_libver],
++    [ldap_lib_ldif=])
++  if test -z "$ldap_lib_ldif" ; then
++    AC_CHECK_LIB([ldif], [_init], [ldap_lib_ldif=-lldif],
++      [ldap_lib_ldif=])
++  fi
+   AC_SUBST([ldap_lib_ldif])
+   LDFLAGS="$save_ldflags"
+   CPPFLAGS="$save_cppflags"
+-- 
+1.8.1.4
+

@@ -1,0 +1,2287 @@
+From 9ab30975120649666c5b911fe09d13651b66a1b9 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 4 Mar 2014 09:35:29 -0800
+Subject: [PATCH 167/225] Ticket 346 - version 4 Slow ldapmodify operation time
+ for large quantities of multi-valued attribute values
+
+Description: Backported commit f6ef7dc23352c82f45c41dfd5e9392971a164a23
+  Author: Ludwig Krispenz <lkrispen@redhat.com>
+
+  Bug Description: The reason for the performance degradation is that
+  for operations like add and delete of values and for updating the
+  index for each values a check has tobe done if it exists in the
+  current attribute.  if the number of values grows the seaqrch time
+  increases.
+
+  Fix Description: Keep a secondary array of the indexes of the
+  valuearray which is sorted.  To locate a value, a binary search
+  can be used.
+
+  A design doc is available at: http://port389.org/wiki/Static_group_performance
+
+  https://fedorahosted.org/389/ticket/346
+(cherry picked from commit 890fc22687821279f3862fc0862a4e8d93c00291)
+---
+ ldap/servers/slapd/attr.c                     |   72 +-
+ ldap/servers/slapd/attrlist.c                 |    2 +-
+ ldap/servers/slapd/attrsyntax.c               |    9 +
+ ldap/servers/slapd/back-ldbm/import-threads.c |    2 +-
+ ldap/servers/slapd/back-ldbm/index.c          |   26 +-
+ ldap/servers/slapd/back-ldbm/ldbm_attr.c      |    6 +-
+ ldap/servers/slapd/computed.c                 |    2 +-
+ ldap/servers/slapd/entry.c                    |  177 ++--
+ ldap/servers/slapd/entrywsi.c                 |   20 +-
+ ldap/servers/slapd/proto-slap.h               |   13 +-
+ ldap/servers/slapd/schema.c                   |  105 +--
+ ldap/servers/slapd/slap.h                     |    8 +
+ ldap/servers/slapd/slapi-plugin.h             |   15 +-
+ ldap/servers/slapd/slapi-private.h            |    5 +-
+ ldap/servers/slapd/valueset.c                 | 1077 ++++++++++++-------------
+ 15 files changed, 667 insertions(+), 872 deletions(-)
+
+diff --git a/ldap/servers/slapd/attr.c b/ldap/servers/slapd/attr.c
+index 87dfe1e..51621e5 100644
+--- a/ldap/servers/slapd/attr.c
++++ b/ldap/servers/slapd/attr.c
+@@ -323,11 +323,9 @@ Slapi_Attr *
+ slapi_attr_dup(const Slapi_Attr *attr)
+ {
+ 	Slapi_Attr *newattr= slapi_attr_new();
+-	Slapi_Value **present_va= valueset_get_valuearray(&attr->a_present_values); /* JCM Mucking about inside the value set */
+-	Slapi_Value **deleted_va= valueset_get_valuearray(&attr->a_deleted_values); /* JCM Mucking about inside the value set */
+ 	slapi_attr_init(newattr, attr->a_type);
+-	valueset_add_valuearray( &newattr->a_present_values, present_va );
+-	valueset_add_valuearray( &newattr->a_deleted_values, deleted_va );
++	slapi_valueset_set_valueset( &newattr->a_deleted_values,  &attr->a_deleted_values );
++	slapi_valueset_set_valueset( &newattr->a_present_values,  &attr->a_present_values );
+ 	newattr->a_deletioncsn= csn_dup(attr->a_deletioncsn);
+ 	return newattr;
+ }
+@@ -778,67 +776,25 @@ attr_add_valuearray(Slapi_Attr *a, Slapi_Value **vals, const char *dn)
+     }
+ 
+     /*
+-     * determine whether we should use an AVL tree of values or not
++     * add values and check for duplicate values
+      */
+-    for ( i = 0; vals[i] != NULL; i++ ) ;
+-    numofvals = i;
+-
+-    /*
+-     * detect duplicate values
+-     */
+-    if ( numofvals > 1 ) {
+-        /*
+-         * Several values to add: use an AVL tree to detect duplicates.
+-         */
+-        LDAPDebug( LDAP_DEBUG_TRACE,
+-                   "slapi_entry_add_values: using an AVL tree to "
+-                   "detect duplicate values\n", 0, 0, 0 );
+-
+-        if (valueset_isempty(&a->a_present_values)) {
+-            /* if the attribute contains no values yet, just check the
+-             * input vals array for duplicates
+-             */
+-            Avlnode *vtree = NULL;
+-            rc= valuetree_add_valuearray(a, vals, &vtree, &duplicate_index);
+-            valuetree_free(&vtree);
+-            was_present_null = 1;
++    numofvals = valuearray_count(vals);
++    rc = slapi_valueset_add_attr_valuearray_ext (a, &a->a_present_values, vals, numofvals, SLAPI_VALUE_FLAG_DUPCHECK, &duplicate_index);
++    if ( rc != LDAP_SUCCESS) {
++        if (is_type_forbidden(a->a_type)) {
++            /* If the attr is in the forbidden list
++             * (e.g., unhashed password),
++             * we don't return any useful info to the clients. */
++            rc = LDAP_OTHER;
+         } else {
+-            /* the attr and vals both contain values, check intersection */
+-            rc= valueset_intersectswith_valuearray(&a->a_present_values, a, vals, &duplicate_index);
+-        }
+-
+-    } else if ( !valueset_isempty(&a->a_present_values) ) {
+-        /*
+-         * One or no value to add: don't bother constructing
+-         * an AVL tree, etc. since it probably isn't worth the time.
+-         */
+-        for ( i = 0; vals[i] != NULL; ++i ) {
+-            if ( slapi_attr_value_find( a, slapi_value_get_berval(vals[i]) ) == 0 ) {
+-                duplicate_index = i;
+-                if (is_type_forbidden(a->a_type)) {
+-                    /* If the attr is in the forbidden list
+-                     * (e.g., unhashed password),
+-                     * we don't return any useful info to the clients. */
+-                    rc = LDAP_OTHER;
+-                } else {
+-                    rc = LDAP_TYPE_OR_VALUE_EXISTS;
+-                }
+-                break;
+-            }
++            rc = LDAP_TYPE_OR_VALUE_EXISTS;
+         }
+     }
+ 
+-    /*
+-     * add values if no duplicates detected
+-     */
+-    if(rc==LDAP_SUCCESS) {
+-        valueset_add_valuearray( &a->a_present_values, vals );
+-    }
+-
+     /* In the case of duplicate value, rc == LDAP_TYPE_OR_VALUE_EXISTS or
+      * LDAP_OPERATIONS_ERROR
+      */
+-    else if ( duplicate_index >= 0 ) {
++    if ( duplicate_index >= 0 ) {
+         char bvvalcopy[BUFSIZ];
+         char *duplicate_string = "null or non-ASCII";
+ 
+@@ -879,7 +835,7 @@ attr_add_valuearray(Slapi_Attr *a, Slapi_Value **vals, const char *dn)
+  */
+ int attr_replace(Slapi_Attr *a, Slapi_Value **vals)
+ {
+-    return valueset_replace(a, &a->a_present_values, vals);
++    return valueset_replace_valuearray(a, &a->a_present_values, vals);
+ }
+ 
+ int 
+diff --git a/ldap/servers/slapd/attrlist.c b/ldap/servers/slapd/attrlist.c
+index e365f3d..cedf9ea 100644
+--- a/ldap/servers/slapd/attrlist.c
++++ b/ldap/servers/slapd/attrlist.c
+@@ -112,7 +112,7 @@ attrlist_merge_valuearray(Slapi_Attr **alist, const char *type, Slapi_Value **va
+ 	Slapi_Attr	**a= NULL;
+ 	if (!vals) return;
+ 	attrlist_find_or_create(alist, type, &a);
+-	valueset_add_valuearray( &(*a)->a_present_values, vals );
++	slapi_valueset_add_valuearray( *a, &(*a)->a_present_values, vals );
+ }    
+ 
+ 
+diff --git a/ldap/servers/slapd/attrsyntax.c b/ldap/servers/slapd/attrsyntax.c
+index 2dabf1f..c0827e2 100644
+--- a/ldap/servers/slapd/attrsyntax.c
++++ b/ldap/servers/slapd/attrsyntax.c
+@@ -861,11 +861,20 @@ slapi_attr_is_dn_syntax_attr(Slapi_Attr *attr)
+ 	const char *syntaxoid = NULL;
+ 	int dn_syntax = 0; /* not DN, by default */
+ 
++	if (attr && attr->a_flags & SLAPI_ATTR_FLAG_SYNTAX_IS_DN)
++		/* it was checked before */
++		return(1);
++
++	if (attr && attr->a_plugin == NULL) {
++ 	    slapi_attr_init_syntax (attr);
++ 	}
+ 	if (attr && attr->a_plugin) { /* If not set, there is no way to get the info */
+ 		if ((syntaxoid = attr_get_syntax_oid(attr))) {
+ 			dn_syntax = ((0 == strcmp(syntaxoid, NAMEANDOPTIONALUID_SYNTAX_OID))
+ 						 || (0 == strcmp(syntaxoid, DN_SYNTAX_OID)));
+ 		}
++		if (dn_syntax)
++			attr->a_flags |= SLAPI_ATTR_FLAG_SYNTAX_IS_DN;
+ 	}
+ 	return dn_syntax;
+ }
+diff --git a/ldap/servers/slapd/back-ldbm/import-threads.c b/ldap/servers/slapd/back-ldbm/import-threads.c
+index 5667acb..c7d3444 100644
+--- a/ldap/servers/slapd/back-ldbm/import-threads.c
++++ b/ldap/servers/slapd/back-ldbm/import-threads.c
+@@ -2274,7 +2274,7 @@ import_foreman(void *param)
+ 
+                 /* Setting new entrydn attribute value */
+                 slapi_attr_init(new_entrydn, "entrydn");
+-                valueset_add_string(&new_entrydn->a_present_values,
++                valueset_add_string(new_entrydn, &new_entrydn->a_present_values,
+                                     /* new_dn: duped in valueset_add_string */
+                                     (const char *)new_dn,
+                                     CSN_TYPE_UNKNOWN, NULL);
+diff --git a/ldap/servers/slapd/back-ldbm/index.c b/ldap/servers/slapd/back-ldbm/index.c
+index 66d6e7e..2d5b535 100644
+--- a/ldap/servers/slapd/back-ldbm/index.c
++++ b/ldap/servers/slapd/back-ldbm/index.c
+@@ -547,7 +547,7 @@ index_add_mods(
+ 
+         for (curr_attr = newe->ep_entry->e_attrs; curr_attr != NULL; curr_attr = curr_attr->a_next) {
+             if (slapi_attr_type_cmp( basetype, curr_attr->a_type, SLAPI_TYPE_CMP_BASE ) == 0) {
+-                valueset_add_valuearray(all_vals, attr_get_present_values(curr_attr));
++                slapi_valueset_join_attr_valueset(curr_attr, all_vals, &curr_attr->a_present_values);
+             }
+         }
+  
+@@ -568,7 +568,7 @@ index_add_mods(
+ 
+             for (curr_attr = olde->ep_entry->e_attrs; curr_attr != NULL; curr_attr = curr_attr->a_next) {
+                 if (slapi_attr_type_cmp( mods[i]->mod_type, curr_attr->a_type, SLAPI_TYPE_CMP_EXACT ) == 0) {
+-                    valueset_add_valuearray(mod_vals, attr_get_present_values(curr_attr));
++                	slapi_valueset_join_attr_valueset(curr_attr, mod_vals, &curr_attr->a_present_values);
+                 }
+             }
+                                                                                                                             
+@@ -586,7 +586,7 @@ index_add_mods(
+                 slapi_entry_attr_find( olde->ep_entry, mods[i]->mod_type, &curr_attr );
+                 if ( mods_valueArray != NULL ) {
+                     for ( j = 0; mods_valueArray[j] != NULL; j++ ) {
+-                        Slapi_Value *rval = valuearray_remove_value(curr_attr, evals, mods_valueArray[j]);
++                        Slapi_Value *rval = valueset_remove_value(curr_attr, all_vals, mods_valueArray[j]);
+                         slapi_value_free( &rval );
+                     }
+                 }
+@@ -595,12 +595,12 @@ index_add_mods(
+                  * they don't exist, delete the equality index.
+                  */
+                 for ( j = 0; deleted_valueArray[j] != NULL; j++ ) {
+-                    if (valuearray_find(curr_attr, evals, deleted_valueArray[j]) == -1) {
++                    if ( !slapi_valueset_find(curr_attr, all_vals, deleted_valueArray[j])) {
+                         if (!(flags & BE_INDEX_EQUALITY)) {
+                             flags |= BE_INDEX_EQUALITY;
+                         }
+                     } else {
+-                        Slapi_Value *rval = valuearray_remove_value(curr_attr, deleted_valueArray, deleted_valueArray[j]);
++                        Slapi_Value *rval = valueset_remove_value(curr_attr, mod_vals, deleted_valueArray[j]);
+                         slapi_value_free( &rval );
+                         j--;
+                         /* indicates there was some conflict */
+@@ -639,8 +639,8 @@ index_add_mods(
+                 if (curr_attr) { /* found the type */
+                     for (j = 0; mods_valueArray[j] != NULL; j++) {
+                         /* mods_valueArray[j] is in curr_attr ==> return 0 */
+-                        if (slapi_attr_value_find(curr_attr,
+-                                slapi_value_get_berval(mods_valueArray[j]))) {
++                        if ( !slapi_valueset_find(curr_attr, &curr_attr->a_present_values,
++                                mods_valueArray[j])) {
+                             /* The value is NOT in newe, remove it. */
+                             Slapi_Value *rval;
+                             rval = valuearray_remove_value(curr_attr,
+@@ -678,9 +678,9 @@ index_add_mods(
+                 mod_vals = slapi_valueset_new();
+ 
+                 for (curr_attr = olde->ep_entry->e_attrs; curr_attr != NULL; curr_attr = curr_attr->a_next) {
+-                        if (slapi_attr_type_cmp( mods[i]->mod_type, curr_attr->a_type, SLAPI_TYPE_CMP_EXACT ) == 0) {
+-                            valueset_add_valuearray(mod_vals, attr_get_present_values(curr_attr));
+-                        }
++                    if (slapi_attr_type_cmp( mods[i]->mod_type, curr_attr->a_type, SLAPI_TYPE_CMP_EXACT ) == 0) {
++                        slapi_valueset_join_attr_valueset(curr_attr, mod_vals, &curr_attr->a_present_values);
++                    }
+                 }
+ 
+                 deleted_valueArray = valueset_get_valuearray(mod_vals);
+@@ -696,14 +696,14 @@ index_add_mods(
+                              * also exist in a subtype.
+                              */
+                             for (j = 0; deleted_valueArray && deleted_valueArray[j]; j++) {
+-                                if ( valuearray_find(curr_attr, evals, deleted_valueArray[j]) == -1 ) {
++                                if ( !slapi_valueset_find(curr_attr, all_vals, deleted_valueArray[j])) {
+                                     /* If the equality flag isn't already set, set it */
+                                     if (!(flags & BE_INDEX_EQUALITY)) {
+                                         flags |= BE_INDEX_EQUALITY;
+                                     }
+                                 } else {
+                                     /* Remove duplicate value from the mod list */
+-                                    Slapi_Value *rval = valuearray_remove_value(curr_attr, deleted_valueArray, deleted_valueArray[j]);
++                                    Slapi_Value *rval = valueset_remove_value(curr_attr, mod_vals, deleted_valueArray[j]);
+                                     slapi_value_free( &rval );
+                                     j--;
+                                 }
+@@ -752,7 +752,7 @@ index_add_mods(
+                     if (curr_attr) {
+                         int found = 0;
+                         for (j = 0; mods_valueArray[j] != NULL; j++ ) {
+-                            if ( valuearray_find(curr_attr, evals, mods_valueArray[j]) > -1 ) {
++                            if ( slapi_valueset_find(curr_attr, all_vals, mods_valueArray[j])) {
+                                 /* The same value found in evals. 
+                                  * We don't touch the equality index. */
+                                 found = 1;
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_attr.c b/ldap/servers/slapd/back-ldbm/ldbm_attr.c
+index fa18550..16ffa42 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_attr.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_attr.c
+@@ -931,7 +931,7 @@ ldbm_compute_evaluator(computed_attr_context *c,char* type,Slapi_Entry *e,slapi_
+ 			Slapi_Attr our_attr;
+ 			slapi_attr_init(&our_attr, numsubordinates);
+ 			our_attr.a_flags = SLAPI_ATTR_FLAG_OPATTR;
+-			valueset_add_string(&our_attr.a_present_values,"0",CSN_TYPE_UNKNOWN,NULL);
++			valueset_add_string(&our_attr, &our_attr.a_present_values,"0",CSN_TYPE_UNKNOWN,NULL);
+ 			rc = (*outputfn) (c, &our_attr, e);
+ 			attr_done(&our_attr);
+ 			return (rc);
+@@ -948,9 +948,9 @@ ldbm_compute_evaluator(computed_attr_context *c,char* type,Slapi_Entry *e,slapi_
+ 		rc = slapi_entry_attr_find( e, numsubordinates, &read_attr );
+ 		if ( (0 != rc) || slapi_entry_attr_hasvalue(e,numsubordinates,"0") ) {
+ 			/* If not, or present and zero, we return FALSE, otherwise TRUE */
+-			valueset_add_string(&our_attr.a_present_values,"FALSE",CSN_TYPE_UNKNOWN,NULL);
++			valueset_add_string(&our_attr, &our_attr.a_present_values,"FALSE",CSN_TYPE_UNKNOWN,NULL);
+ 		} else {
+-			valueset_add_string(&our_attr.a_present_values,"TRUE",CSN_TYPE_UNKNOWN,NULL);
++			valueset_add_string(&our_attr, &our_attr.a_present_values,"TRUE",CSN_TYPE_UNKNOWN,NULL);
+ 		}
+ 		rc = (*outputfn) (c, &our_attr, e);
+ 		attr_done(&our_attr);
+diff --git a/ldap/servers/slapd/computed.c b/ldap/servers/slapd/computed.c
+index 353d375..b82e2e8 100644
+--- a/ldap/servers/slapd/computed.c
++++ b/ldap/servers/slapd/computed.c
+@@ -124,7 +124,7 @@ compute_stock_evaluator(computed_attr_context *c,char* type,Slapi_Entry *e,slapi
+ 		Slapi_Attr our_attr;
+ 		slapi_attr_init(&our_attr, subschemasubentry);
+ 		our_attr.a_flags = SLAPI_ATTR_FLAG_OPATTR;
+-		valueset_add_string(&our_attr.a_present_values,SLAPD_SCHEMA_DN,CSN_TYPE_UNKNOWN,NULL);
++		valueset_add_string(&our_attr, &our_attr.a_present_values,SLAPD_SCHEMA_DN,CSN_TYPE_UNKNOWN,NULL);
+ 		rc = (*outputfn) (c, &our_attr, e);
+ 		attr_done(&our_attr);
+ 		return (rc);
+diff --git a/ldap/servers/slapd/entry.c b/ldap/servers/slapd/entry.c
+index 29fe075..8a5df7e 100644
+--- a/ldap/servers/slapd/entry.c
++++ b/ldap/servers/slapd/entry.c
+@@ -223,8 +223,6 @@ str2entry_fast( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 		int freeval = 0;
+ 		int value_state= VALUE_NOTFOUND;
+ 		int attr_state= ATTRIBUTE_NOTFOUND;
+-		int maxvals;
+-		int del_maxvals;
+ 
+ 		if ( *s == '\n' || *s == '\0' ) {
+ 			break;
+@@ -266,9 +264,7 @@ str2entry_fast( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 			slapi_ch_free_string(&ptype);
+ 			ptype=PL_strndup(type.bv_val, type.bv_len);
+ 			nvals = 0;
+-			maxvals = 0;
+ 			del_nvals = 0;
+-			del_maxvals = 0;
+ 			a = NULL;
+ 		}
+ 
+@@ -484,25 +480,21 @@ str2entry_fast( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 			if(value_state==VALUE_DELETED)
+ 			{
+ 				/* consumes the value */
+-				valuearray_add_value_fast(
+-					&(*a)->a_deleted_values.va, /* JCM .va is private */
+-					svalue,
+-					del_nvals,
+-					&del_maxvals,
+-					0/*!Exact*/,
+-					1/*Passin*/ );
++				slapi_valueset_add_attr_value_ext(
++					*a,
++					&(*a)->a_deleted_values,
++ 					svalue,
++					SLAPI_VALUE_FLAG_PASSIN );
+ 				del_nvals++;
+ 			}
+ 			else
+ 			{
+ 				/* consumes the value */
+-				valuearray_add_value_fast(
+-					&(*a)->a_present_values.va, /* JCM .va is private */
+-					svalue, 
+-					nvals,
+-					&maxvals, 
+-					0 /*!Exact*/, 
+-					1 /*Passin*/ );
++				slapi_valueset_add_attr_value_ext(
++					*a,
++					&(*a)->a_present_values,
++ 					svalue, 
++					SLAPI_VALUE_FLAG_PASSIN);
+ 				nvals++;
+ 			}
+ 			if(attributedeletioncsn!=NULL)
+@@ -582,8 +574,8 @@ typedef struct _entry_attrs {
+ typedef struct _str2entry_attr {
+ 	char *sa_type;
+ 	int sa_state;
+- 	struct valuearrayfast sa_present_values;
+- 	struct valuearrayfast sa_deleted_values;
++	struct slapi_value_set sa_present_values;
++	struct slapi_value_set sa_deleted_values;
+ 	int sa_numdups;
+ 	value_compare_fn_type sa_comparefn;
+ 	Avlnode *sa_vtree;
+@@ -594,13 +586,13 @@ typedef struct _str2entry_attr {
+ static void
+ entry_attr_init(str2entry_attr *sa, const char *type, int state)
+ {
+-    sa->sa_type= slapi_ch_strdup(type);
++	sa->sa_type= slapi_ch_strdup(type);
+ 	sa->sa_state= state;
+-	valuearrayfast_init(&sa->sa_present_values,NULL);
+-	valuearrayfast_init(&sa->sa_deleted_values,NULL);
+-    sa->sa_numdups= 0;
++	slapi_valueset_init(&sa->sa_present_values);
++	slapi_valueset_init(&sa->sa_deleted_values);
++	sa->sa_numdups= 0;
+ 	sa->sa_comparefn = NULL;
+-    sa->sa_vtree= NULL;
++	sa->sa_vtree= NULL;
+ 	sa->sa_attributedeletioncsn= NULL;
+ 	slapi_attr_init(&sa->sa_attr, type);
+ }
+@@ -733,28 +725,26 @@ str2entry_dupcheck( const char *rawdn, char *s, int flags, int read_stateinfo )
+     char *type;
+     struct berval bvtype;
+     str2entry_attr *sa;
+-    int i, j;
++    int i;
+     char *next=NULL;
+     char *valuecharptr=NULL;
+     struct berval bvvalue;
+     int rc;
+-	int fast_dup_check = 0;
+-	entry_attrs *ea = NULL;
+-	int tree_attr_checking = 0;
+-	int big_entry_attr_presence_check = 0;
+-	int check_for_duplicate_values =
+-			( 0 != ( flags & SLAPI_STR2ENTRY_REMOVEDUPVALS ));
+-	Slapi_Value *value = 0;
+-	CSN *attributedeletioncsn= NULL;
+-	CSNSet *valuecsnset= NULL;
+-	CSN *maxcsn= NULL;
+-	char *normdn = NULL;
+-	int strict = 0;
++    entry_attrs *ea = NULL;
++    int tree_attr_checking = 0;
++    int big_entry_attr_presence_check = 0;
++    int check_for_duplicate_values = (0 != (flags & SLAPI_STR2ENTRY_REMOVEDUPVALS));
++    Slapi_Value *value = 0;
++    CSN *attributedeletioncsn= NULL;
++    CSNSet *valuecsnset= NULL;
++    CSN *maxcsn= NULL;
++    char *normdn = NULL;
++    int strict = 0;
+ 
+     /* Check if we should be performing strict validation. */
+     strict = config_get_dn_validate_strict();
+ 
+-	LDAPDebug( LDAP_DEBUG_TRACE, "=> str2entry_dupcheck\n", 0, 0, 0 );
++    LDAPDebug( LDAP_DEBUG_TRACE, "=> str2entry_dupcheck\n", 0, 0, 0 );
+ 
+     e = slapi_entry_alloc();
+     slapi_entry_init(e,NULL,NULL);
+@@ -977,7 +967,6 @@ str2entry_dupcheck( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 		if ( prev_attr==NULL )
+ 		{
+ 		    /* Haven't seen this type yet */
+-			fast_dup_check = 1;
+ 		    if ( nattrs == maxattrs )
+ 		    {
+ 				/* Out of space - reallocate */
+@@ -1009,15 +998,6 @@ str2entry_dupcheck( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 				/* Get the comparison function for later use */
+ 				attr_get_value_cmp_fn( &attrs[nattrs].sa_attr, &(attrs[nattrs].sa_comparefn));
+ 				/*
+-				 * If the compare function wasn't available,
+-				 * we have to revert to AVL-tree-based dup checking,
+-				 * which uses index keys for comparisons
+-				 */
+-				if (NULL == attrs[nattrs].sa_comparefn)
+-				{
+-					fast_dup_check = 0;
+-				}
+-				/*
+ 				 * If we are maintaining the attribute tree,
+ 				 * then add the new attribute to the tree.
+ 				 */
+@@ -1073,66 +1053,20 @@ str2entry_dupcheck( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 		{
+ 			/* 
+ 			 * for deleted values, we do not want to perform a dupcheck against
+-			 * existing values. Also, we do not want to add it to the
+-			 * avl tree (if one is being maintained)
+-			 *
++			 * existing values.
+ 			 */
+-			rc = 0; /* Presume no duplicate */
++			rc = slapi_valueset_add_attr_value_ext(&sa->sa_attr, &sa->sa_deleted_values,value, SLAPI_VALUE_FLAG_PASSIN);
+ 		}
+-		else if ( !check_for_duplicate_values )
++		else
+ 		{
+-			rc = LDAP_SUCCESS;	/* presume no duplicate */
+-		} else {
+-			/* For value dup checking, we either use brute-force, if there's a small number */
+-			/* Or a tree-based approach if there's a large number. */
+-			/* The tree code is expensive, which is why we don't use it unless there's many attributes */
+-			rc = 0; /* Presume no duplicate */
+-			if (fast_dup_check)
+-			{
+-				/* Fast dup-checking */
+-				/* Do we now have so many values that we should switch to tree-based checking ? */
+-				if (sa->sa_present_values.num > STR2ENTRY_VALUE_DUPCHECK_THRESHOLD)
+-				{
+-					/* Make the tree from the existing attr values */
+-					rc= valuetree_add_valuearray( &sa->sa_attr, sa->sa_present_values.va, &sa->sa_vtree, NULL);
+-					/* Check if the value already exists, in the tree. */
+-					rc= valuetree_add_value( &sa->sa_attr, value, &sa->sa_vtree);
+-					fast_dup_check = 0;
+-				}
+-				else
+-				{
+-					/* JCM - need an efficient valuearray function to do this */
+-					/* Brute-force check */
+-					for ( j = 0; j < sa->sa_present_values.num; j++ )/* JCM innards */
+-					{
+-						if (0 == sa->sa_comparefn(slapi_value_get_berval(value),slapi_value_get_berval(sa->sa_present_values.va[j])))/* JCM innards */
+-						{
+-							/* Oops---this value matches one already present */
+-							rc = LDAP_TYPE_OR_VALUE_EXISTS;
+-							break;
+-						}
+-					}
+-				}
+-			}
+-			else
+-			{
+-				/* Check if the value already exists, in the tree. */
+-				rc = valuetree_add_value( &sa->sa_attr, value, &sa->sa_vtree);
+-			}
++			int flags = SLAPI_VALUE_FLAG_PASSIN;
++			if (check_for_duplicate_values) flags |= SLAPI_VALUE_FLAG_DUPCHECK;
++			rc = slapi_valueset_add_attr_value_ext(&sa->sa_attr, &sa->sa_present_values,value, flags);
+ 		}
+ 
+ 		if ( rc==LDAP_SUCCESS )
+ 		{
+-			if(value_state==VALUE_DELETED)
+-			{
+-				valuearrayfast_add_value_passin(&sa->sa_deleted_values,value);
+-				value= NULL; /* value was consumed */
+-			}
+-			else
+-			{
+-				valuearrayfast_add_value_passin(&sa->sa_present_values,value);
+-				value= NULL; /* value was consumed */
+-			}
++			value= NULL; /* value was consumed */
+ 			if(attributedeletioncsn!=NULL)
+ 			{
+ 				sa->sa_attributedeletioncsn= attributedeletioncsn;
+@@ -1147,7 +1081,7 @@ str2entry_dupcheck( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 		else
+ 		{
+ 		    /* Failure adding to value tree */
+-		    LDAPDebug( LDAP_DEBUG_ANY, "str2entry_dupcheck: unexpected failure %d constructing value tree\n", rc, 0, 0 );
++		    LDAPDebug( LDAP_DEBUG_ANY, "str2entry_dupcheck: unexpected failure %d adding value\n", rc, 0, 0 );
+ 		    slapi_entry_free( e ); e = NULL;
+ 		    goto free_and_return;
+ 		}
+@@ -1212,27 +1146,21 @@ str2entry_dupcheck( const char *rawdn, char *s, int flags, int read_stateinfo )
+ 			}
+ 			if(alist!=NULL)
+ 			{
+-				int maxvals = 0;
+ 				Slapi_Attr **a= NULL;
+ 				attrlist_find_or_create_locking_optional(alist, sa->sa_type, &a, PR_FALSE);
+-				valuearray_add_valuearray_fast( /* JCM should be calling a valueset function */
+-					&(*a)->a_present_values.va, /* JCM .va is private */
+-					sa->sa_present_values.va,
+-					0, /* Currently there are no present values on the attribute */
+-					sa->sa_present_values.num,
+-					&maxvals,
+-					1/*Exact*/,
+-					1/*Passin*/);
++				slapi_valueset_add_attr_valuearray_ext(
++					*a,
++					&(*a)->a_present_values,
++ 					sa->sa_present_values.va,
++ 					sa->sa_present_values.num,
++					SLAPI_VALUE_FLAG_PASSIN, NULL);
+ 				sa->sa_present_values.num= 0; /* The values have been consumed */
+-				maxvals = 0;
+-				valuearray_add_valuearray_fast( /* JCM should be calling a valueset function */
+-					&(*a)->a_deleted_values.va, /* JCM .va is private */
+-					sa->sa_deleted_values.va,
+-					0, /* Currently there are no deleted values on the attribute */
+-					sa->sa_deleted_values.num,
+-					&maxvals,
+-					1/*Exact*/,
+-					1/*Passin*/);
++				slapi_valueset_add_attr_valuearray_ext(
++					*a,
++					&(*a)->a_deleted_values,
++ 					sa->sa_deleted_values.va,
++ 					sa->sa_deleted_values.num,
++					SLAPI_VALUE_FLAG_PASSIN, NULL);
+ 				sa->sa_deleted_values.num= 0; /* The values have been consumed */
+ 				if(sa->sa_attributedeletioncsn!=NULL)
+ 				{
+@@ -1279,9 +1207,8 @@ free_and_return:
+     for ( i = 0; i < nattrs; i++ )
+     {
+ 		slapi_ch_free((void **) &(attrs[ i ].sa_type));
+-		valuearrayfast_done(&attrs[ i ].sa_present_values);
+-		valuearrayfast_done(&attrs[ i ].sa_deleted_values);
+-		valuetree_free( &attrs[ i ].sa_vtree );
++		slapi_ch_free((void **) &(attrs[ i ].sa_present_values.va));
++		slapi_ch_free((void **) &(attrs[ i ].sa_deleted_values.va));
+ 		attr_done( &attrs[ i ].sa_attr );
+     }
+ 	if (tree_attr_checking)
+@@ -2663,7 +2590,7 @@ slapi_entry_add_string(Slapi_Entry *e, const char *type, const char *value)
+ {
+ 	Slapi_Attr **a= NULL;
+ 	attrlist_find_or_create(&e->e_attrs, type, &a);
+-	valueset_add_string ( &(*a)->a_present_values, value, CSN_TYPE_UNKNOWN, NULL);
++	valueset_add_string ( *a, &(*a)->a_present_values, value, CSN_TYPE_UNKNOWN, NULL);
+ 	return 0;
+ }
+ 
+diff --git a/ldap/servers/slapd/entrywsi.c b/ldap/servers/slapd/entrywsi.c
+index cca615d..8cee986 100644
+--- a/ldap/servers/slapd/entrywsi.c
++++ b/ldap/servers/slapd/entrywsi.c
+@@ -464,7 +464,10 @@ entry_add_present_values_wsi(Slapi_Entry *e, const char *type, struct berval **b
+ 
+ 			/* Append the pending values to a->a_present_values */
+ 			valuearray_update_csn (valuestoadd,CSN_TYPE_VALUE_UPDATED,csn);
+-			valueset_add_valuearray_ext(&a->a_present_values, valuestoadd, SLAPI_VALUE_FLAG_PASSIN);
++			slapi_valueset_add_attr_valuearray_ext(a, &a->a_present_values,
++			                                       valuestoadd,
++			                                       valuearray_count(valuestoadd),
++			                                       SLAPI_VALUE_FLAG_PASSIN, NULL);
+ 			slapi_ch_free ( (void **)&valuestoadd );
+ 
+ 			/*
+@@ -502,7 +505,10 @@ entry_add_present_values_wsi(Slapi_Entry *e, const char *type, struct berval **b
+ 				Slapi_ValueSet vs;
+ 				/* Add each deleted value to the present list */
+ 				valuearray_update_csn(deletedvalues,CSN_TYPE_VALUE_UPDATED,csn);
+-				valueset_add_valuearray_ext(&a->a_present_values, deletedvalues, SLAPI_VALUE_FLAG_PASSIN);
++				slapi_valueset_add_attr_valuearray_ext(a, &a->a_present_values,
++				                                       deletedvalues,
++				                                       valuearray_count(deletedvalues),
++				                                       SLAPI_VALUE_FLAG_PASSIN, NULL);
+ 				/* Remove the deleted values from the values to add */
+ 				valueset_set_valuearray_passin(&vs,valuestoadd); 
+ 				valueset_remove_valuearray(&vs, a, deletedvalues, SLAPI_VALUE_FLAG_IGNOREERROR, &v);
+@@ -583,7 +589,10 @@ entry_delete_present_values_wsi(Slapi_Entry *e, const char *type, struct berval
+ 				valueset_update_csn_for_valuearray(&a->a_deleted_values, a, valuestodelete, CSN_TYPE_VALUE_DELETED, csn, &valuesupdated);
+ 				valuearray_free(&valuesupdated);
+ 				valuearray_update_csn(valuestodelete,CSN_TYPE_VALUE_DELETED,csn);
+-				valueset_add_valuearray_ext(&a->a_deleted_values, valuestodelete, SLAPI_VALUE_FLAG_PASSIN);
++				slapi_valueset_add_attr_valuearray_ext(a, &a->a_deleted_values,
++				                                       valuestodelete,
++				                                       valuearray_count(valuestodelete),
++				                                       SLAPI_VALUE_FLAG_PASSIN, NULL);
+ 				/* all the elements in valuestodelete are passed;
+ 				 * should free valuestodelete only (don't call valuearray_free)
+ 				 * [622023] */
+@@ -602,7 +611,10 @@ entry_delete_present_values_wsi(Slapi_Entry *e, const char *type, struct berval
+ 						/* We don't maintain a deleted value list for single valued attributes */
+ 						/* Add each deleted value to the deleted set */
+ 						valuearray_update_csn(deletedvalues,CSN_TYPE_VALUE_DELETED,csn);
+-						valueset_add_valuearray_ext(&a->a_deleted_values, deletedvalues, SLAPI_VALUE_FLAG_PASSIN);
++						slapi_valueset_add_attr_valuearray_ext(a, &a->a_deleted_values,
++						                                       deletedvalues,
++						                                       valuearray_count(deletedvalues),
++						                                       SLAPI_VALUE_FLAG_PASSIN, NULL);
+ 						slapi_ch_free((void **)&deletedvalues);
+ 					}
+ 					else {
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 7a20bdf..954cfd2 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -166,13 +166,6 @@ int valuearray_first_value( Slapi_Value **va, Slapi_Value **v );
+ 
+ void valuearrayfast_init(struct valuearrayfast *vaf,Slapi_Value **va);
+ void valuearrayfast_done(struct valuearrayfast *vaf);
+-void valuearrayfast_add_value(struct valuearrayfast *vaf,const Slapi_Value *v);
+-void valuearrayfast_add_value_passin(struct valuearrayfast *vaf,Slapi_Value *v);
+-void valuearrayfast_add_valuearrayfast(struct valuearrayfast *vaf,const struct valuearrayfast *vaf_add);
+-
+-int valuetree_add_value( const Slapi_Attr *sattr, const Slapi_Value *va, Avlnode **valuetreep);
+-int valuetree_add_valuearray( const Slapi_Attr *sattr, Slapi_Value **va, Avlnode **valuetreep, int *duplicate_index);
+-void valuetree_free( Avlnode **valuetreep );
+ 
+ /* Valueset functions */
+ 
+@@ -183,15 +176,17 @@ int valueset_remove_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slapi_Va
+ int valueset_purge(Slapi_ValueSet *vs, const CSN *csn);
+ Slapi_Value **valueset_get_valuearray(const Slapi_ValueSet *vs);
+ size_t valueset_size(const Slapi_ValueSet *vs);
++void slapi_valueset_add_valuearray(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **addvals);
+ void valueset_add_valuearray(Slapi_ValueSet *vs, Slapi_Value **addvals);
+ void valueset_add_valuearray_ext(Slapi_ValueSet *vs, Slapi_Value **addvals, PRUint32 flags);
+-void valueset_add_string(Slapi_ValueSet *vs, const char *s, CSNType t, const CSN *csn);
++void valueset_add_string(const Slapi_Attr *a, Slapi_ValueSet *vs, const char *s, CSNType t, const CSN *csn);
+ void valueset_update_csn(Slapi_ValueSet *vs, CSNType t, const CSN *csn);
+ void valueset_add_valueset(Slapi_ValueSet *vs1, const Slapi_ValueSet *vs2);
+ int valueset_intersectswith_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slapi_Value **values, int *duplicate_index);
+ Slapi_ValueSet *valueset_dup(const Slapi_ValueSet *dupee);
+ void valueset_remove_string(const Slapi_Attr *a, Slapi_ValueSet *vs, const char *s);
+-int valueset_replace(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **vals);
++int valueset_replace_valuearray(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **vals);
++int valueset_replace_valuearray_ext(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **vals, int dupcheck);
+ void valueset_update_csn_for_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slapi_Value **valuestoupdate, CSNType t, const CSN *csn, Slapi_Value ***valuesupdated);
+ void valueset_set_valuearray_byval(Slapi_ValueSet *vs, Slapi_Value **addvals);
+ void valueset_set_valuearray_passin(Slapi_ValueSet *vs, Slapi_Value **addvals);
+diff --git a/ldap/servers/slapd/schema.c b/ldap/servers/slapd/schema.c
+index 258f6eb..045989d 100644
+--- a/ldap/servers/slapd/schema.c
++++ b/ldap/servers/slapd/schema.c
+@@ -4707,11 +4707,11 @@ va_locate_oc_val( Slapi_Value **va, const char *oc_name, const char *oc_oid )
+  *		oc_unlock();
+  */
+ static void
+-va_expand_one_oc( const char *dn, Slapi_Value ***vap, const char *ocs )
++va_expand_one_oc( const char *dn, const Slapi_Attr *a, Slapi_ValueSet *vs, const char *ocs )
+ {
+ 	struct objclass	*this_oc, *sup_oc;
+-	int				p,i;
+-	Slapi_Value		**newva;
++	int p;
++	Slapi_Value **va = vs->va;
+ 
+ 	this_oc = oc_find_nolock( ocs );
+   
+@@ -4728,29 +4728,18 @@ va_expand_one_oc( const char *dn, Slapi_Value ***vap, const char *ocs )
+ 		return;			/* superior is unknown -- ignore */
+ 	}
+ 
+-	p = va_locate_oc_val( *vap, sup_oc->oc_name, sup_oc->oc_oid );
++	p = va_locate_oc_val( va, sup_oc->oc_name, sup_oc->oc_oid );
+ 
+ 	if ( p != -1 ) {
+ 		return;			/* value already present -- done! */
+ 	}
+   
+-	/* parent was not found.  add to the end */
+-	for ( i = 0; (*vap)[i] != NULL; i++ ) {
+-		;
+-	}
+-  
+-	/* prevent loops: stop if more than 1000 OC values are present */
+-	if ( i > 1000 ) {
++	if ( slapi_valueset_count(vs) > 1000 ) {
+ 		return;
+ 	}
+   
+-	newva = (Slapi_Value **)slapi_ch_realloc( (char *)*vap,
+-			( i + 2 )*sizeof(Slapi_Value *));
+-  
+-	newva[i] = slapi_value_new_string(sup_oc->oc_name);
+-	newva[i+1] = NULL;
+-  
+-	*vap = newva;
++  	slapi_valueset_add_attr_value_ext(a, vs, slapi_value_new_string(sup_oc->oc_name), SLAPI_VALUE_FLAG_PASSIN);
++
+ 	LDAPDebug( LDAP_DEBUG_TRACE,
+ 			"Entry \"%s\": added missing objectClass value %s\n",
+ 			dn, sup_oc->oc_name, 0 );
+@@ -4762,11 +4751,12 @@ va_expand_one_oc( const char *dn, Slapi_Value ***vap, const char *ocs )
+  * All missing superior classes are added to the objectClass attribute, as
+  * is 'top' if it is missing.
+  */
+-void
+-slapi_schema_expand_objectclasses( Slapi_Entry *e )
++static void
++schema_expand_objectclasses_ext( Slapi_Entry *e, int lock)
+ {
+ 	Slapi_Attr		*sa;
+-	Slapi_Value		**va;
++	Slapi_Value		*v;
++	Slapi_ValueSet		*vs;
+ 	const char		*dn = slapi_entry_get_dn_const( e );
+ 	int				i;
+ 
+@@ -4774,76 +4764,41 @@ slapi_schema_expand_objectclasses( Slapi_Entry *e )
+ 		return;		/* no OC values -- nothing to do */
+ 	}
+ 
+-	va = attr_get_present_values( sa );
+-
+-	if ( va == NULL || va[0] == NULL ) {
++	vs = &sa->a_present_values;
++	if ( slapi_valueset_isempty(vs) ) {
+ 		return;		/* no OC values -- nothing to do */
+ 	}
+ 
+-	oc_lock_read();
++	if (lock)
++		oc_lock_read();
+ 
+ 	/*
+ 	 * This loop relies on the fact that bv_expand_one_oc()
+ 	 * always adds to the end
+ 	 */
+-	for ( i = 0; va[i] != NULL; ++i ) {
+-		if ( NULL != slapi_value_get_string(va[i]) ) {
+-			va_expand_one_oc( dn, &va, slapi_value_get_string(va[i]) );
+-		}
++	i = slapi_valueset_first_value(vs,&v);
++	while ( v != NULL) {
++		if ( NULL != slapi_value_get_string(v) ) {
++			va_expand_one_oc( dn, sa, &sa->a_present_values, slapi_value_get_string(v) );
++ 		}
++		i = slapi_valueset_next_value(vs, i, &v);
+ 	}
+   
+ 	/* top must always be present */
+-	va_expand_one_oc( dn, &va, "top" );
+-
+-	/*
+-	 * Reset the present values in the set because we may have realloc'd it.
+-	 * Note that this is the counterpart to the attr_get_present_values()
+-	 * call we made above... nothing new has been allocated, but sa holds
+-	 * a pointer to the original (pre realloc) va.
+-	 */
+-	sa->a_present_values.va = va;
+-
+-	oc_unlock();
++	va_expand_one_oc( dn, sa, &sa->a_present_values, "top" );
++	if (lock)
++		oc_unlock();
++}
++void
++slapi_schema_expand_objectclasses( Slapi_Entry *e )
++{
++	schema_expand_objectclasses_ext( e, 1);
+ }
+ 
+ void
+ schema_expand_objectclasses_nolock( Slapi_Entry *e )
+ {
+-	Slapi_Attr		*sa;
+-	Slapi_Value		**va;
+-	const char		*dn = slapi_entry_get_dn_const( e );
+-	int				i;
+-
+-	if ( 0 != slapi_entry_attr_find( e, SLAPI_ATTR_OBJECTCLASS, &sa )) {
+-		return;		/* no OC values -- nothing to do */
+-	}
+-
+-	va = attr_get_present_values( sa );
+-
+-	if ( va == NULL || va[0] == NULL ) {
+-		return;		/* no OC values -- nothing to do */
+-	}
+-
+-	/*
+-	 * This loop relies on the fact that bv_expand_one_oc()
+-	 * always adds to the end
+-	 */
+-	for ( i = 0; va[i] != NULL; ++i ) {
+-		if ( NULL != slapi_value_get_string(va[i]) ) {
+-			va_expand_one_oc( dn, &va, slapi_value_get_string(va[i]) );
+-		}
+-	}
+-  
+-	/* top must always be present */
+-	va_expand_one_oc( dn, &va, "top" );
+-
+-	/*
+-	 * Reset the present values in the set because we may have realloc'd it.
+-	 * Note that this is the counterpart to the attr_get_present_values()
+-	 * call we made above... nothing new has been allocated, but sa holds
+-	 * a pointer to the original (pre realloc) va.
+-	 */
+-	sa->a_present_values.va = va;
++	schema_expand_objectclasses_ext( e, 0);
+ }
+ 
+ /* lock to protect both objectclass and schema_dse */
+diff --git a/ldap/servers/slapd/slap.h b/ldap/servers/slapd/slap.h
+index 9a05da9..2465500 100644
+--- a/ldap/servers/slapd/slap.h
++++ b/ldap/servers/slapd/slap.h
+@@ -439,8 +439,14 @@ struct slapi_value
+  *		struct slapi_value_tree *vt;
+  *	};
+  */
++
++/* It is a useless layer, always use the valuarray fast version */
++#define VALUE_SORT_THRESHOLD 10
+ struct slapi_value_set
+ {
++	int num; /* The number of values in the array */
++	int max; /* The number of slots in the array */
++	int *sorted; /* sorted array of indices, if NULL va is not sorted */
+ 	struct slapi_value **va;
+ };
+ 
+@@ -511,6 +517,8 @@ typedef struct asyntaxinfo {
+ #define SLAPI_ATTR_FLAG_NOLOCKING	0x0020	/* the init code doesn't lock the
+ 											   tables */
+ #define SLAPI_ATTR_FLAG_KEEP		0x8000 /* keep when replacing all */
++#define SLAPI_ATTR_FLAG_SYNTAX_LOOKUP_DONE		0x010000 /* syntax lookup done, flag set */
++#define SLAPI_ATTR_FLAG_SYNTAX_IS_DN		0x020000 /* syntax lookup done, flag set */
+ 
+ /* This is the type of the function passed into attr_syntax_enumerate_attrs */
+ typedef int (*AttrEnumFunc)(struct asyntaxinfo *asi, void *arg);
+diff --git a/ldap/servers/slapd/slapi-plugin.h b/ldap/servers/slapd/slapi-plugin.h
+index e5fe904..304c5a8 100644
+--- a/ldap/servers/slapd/slapi-plugin.h
++++ b/ldap/servers/slapd/slapi-plugin.h
+@@ -4594,6 +4594,7 @@ void slapi_ber_bvcpy(struct berval *bvd, const struct berval *bvs);
+ #define SLAPI_VALUE_FLAG_IGNOREERROR	0x2
+ #define SLAPI_VALUE_FLAG_PRESERVECSNSET	0x4
+ #define SLAPI_VALUE_FLAG_USENEWVALUE	0x8	/* see valueset_remove_valuearray */
++#define SLAPI_VALUE_FLAG_DUPCHECK	0x10	/* used in valueset_add... */
+ 
+ /**
+  * Creates an empty \c Slapi_ValueSet structure.
+@@ -4687,7 +4688,8 @@ void slapi_valueset_add_value(Slapi_ValueSet *vs, const Slapi_Value *addval);
+  * \see slapi_valueset_first_value()
+  * \see slapi_valueset_next_value()
+  */
+-void slapi_valueset_add_value_ext(Slapi_ValueSet *vs, Slapi_Value *addval, unsigned long flags);
++void slapi_valueset_add_value_ext(Slapi_ValueSet *vs, const Slapi_Value *addval, unsigned long flags);
++int slapi_valueset_add_attr_value_ext(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value *addval, unsigned long flags);
+ 
+ /**
+  * Gets the first value in a \c Slapi_ValueSet structure.
+@@ -4743,6 +4745,16 @@ int slapi_valueset_next_value( Slapi_ValueSet *vs, int index, Slapi_Value **v);
+ int slapi_valueset_count( const Slapi_ValueSet *vs);
+ 
+ /**
++ * Checks if  a \c Slapi_ValueSet structure has values
++ *
++ * \param vs Pointer to the \c Slapi_ValueSet structure of which
++ *        you wish to get the count.
++ * \return 1 if there are no values contained in the \c Slapi_ValueSet structure.
++ * \return 0 if there are values contained in the \c Slapi_ValueSet structure.
++ */
++int slapi_valueset_isempty( const Slapi_ValueSet *vs);
++
++/**
+  * Initializes a \c Slapi_ValueSet with copies of the values of a \c Slapi_Mod structure.
+  *
+  * \param vs Pointer to the \c Slapi_ValueSet structure into which
+@@ -4773,6 +4785,7 @@ void slapi_valueset_set_from_smod(Slapi_ValueSet *vs, Slapi_Mod *smod);
+  * \see slapi_valueset_done()
+  */
+ void slapi_valueset_set_valueset(Slapi_ValueSet *vs1, const Slapi_ValueSet *vs2);
++void slapi_valueset_join_attr_valueset(const Slapi_Attr *a, Slapi_ValueSet *vs1, const Slapi_ValueSet *vs2);
+ 
+ /**
+  * Finds a requested value in a valueset.
+diff --git a/ldap/servers/slapd/slapi-private.h b/ldap/servers/slapd/slapi-private.h
+index 1efbc8b..8c5541a 100644
+--- a/ldap/servers/slapd/slapi-private.h
++++ b/ldap/servers/slapd/slapi-private.h
+@@ -833,9 +833,12 @@ int charray_normdn_add(char ***chararray, char *dn, char *errstr);
+  * the very least before we make them public.
+  */
+ void valuearray_add_value(Slapi_Value ***vals, const Slapi_Value *addval);
+-void valuearray_add_value_fast(Slapi_Value ***vals, Slapi_Value *addval, int nvals, int *maxvals, int exact, int passin);
+ void valuearray_add_valuearray( Slapi_Value ***vals, Slapi_Value **addvals, PRUint32 flags );
+ void valuearray_add_valuearray_fast( Slapi_Value ***vals, Slapi_Value **addvals, int nvals, int naddvals, int *maxvals, int exact, int passin );
++Slapi_Value * valueset_find_sorted (const Slapi_Attr *a, const Slapi_ValueSet *vs, const Slapi_Value *v, int *index);
++int valueset_insert_value_to_sorted(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value *vi, int dupcheck);
++void valueset_array_to_sorted (const Slapi_Attr *a, Slapi_ValueSet *vs);
++int slapi_valueset_add_attr_valuearray_ext(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **addval, int nvals, unsigned long flags, int *dup_index);
+ int valuearray_find(const Slapi_Attr *a, Slapi_Value **va, const Slapi_Value *v);
+ int valuearray_dn_normalize_value(Slapi_Value **vals);
+ 
+diff --git a/ldap/servers/slapd/valueset.c b/ldap/servers/slapd/valueset.c
+index 732b411..4ee2938 100644
+--- a/ldap/servers/slapd/valueset.c
++++ b/ldap/servers/slapd/valueset.c
+@@ -469,7 +469,8 @@ valuearray_purge(Slapi_Value ***va, const CSN *csn)
+ 		*va= NULL;
+ 	}
+ 
+-	return(0);
++	/* return the number of remaining values */
++	return(i);
+ }
+ 
+ size_t
+@@ -498,51 +499,6 @@ valuearray_update_csn(Slapi_Value **va, CSNType t, const CSN *csn)
+ 	}
+ }
+ 
+-/*
+- * Shunt up the values to cover the empty slots.
+- *
+- * "compressed" means "contains no NULL's"
+- *
+- * Invariant for the outer loop:
+- * 	va[0..i] is compressed &&
+- * 	va[n..numvalues] contains just NULL's
+- *
+- * Invariant for the inner loop:
+- * 	i<j<=k<=n && va[j..k] has been shifted left by (j-i) places &&
+- * 	va[k..n] remains to be shifted left by (j-i) places
+- * 
+- */
+-void
+-valuearray_compress(Slapi_Value **va,int numvalues)
+-{
+-	int i = 0;
+-	int n= numvalues;
+-	while(i<n)
+-	{
+-		if ( va[i] != NULL ) {
+-			i++;
+-		} else {
+-			int k,j;
+-			j = i + 1;
+-			/* Find the length of the next run of NULL's */
+-			while( j<n && va[j] == NULL) { j++; }
+-			/* va[i..j] is all NULL && j<= n */	
+-			for ( k = j; k<n; k++ )
+-			{
+-				va[k - (j-i)] = va[k];
+-				va[k] = NULL;
+-			}
+-			/* va[i..n] has been shifted down by j-i places */
+-			n = n - (j-i);
+-			/*
+-			 * If va[i] in now non null, then bump i,
+-			 * if not then we are done anyway (j==n) so can bump it.
+-			*/
+-			i++;
+-		}
+-	}
+-}
+-
+ /* <=========================== Value Array Fast ==========================> */
+ 
+ void
+@@ -583,237 +539,11 @@ valuearrayfast_add_value_passin(struct valuearrayfast *vaf,Slapi_Value *v)
+ 	vaf->num++;
+ }
+ 
+-void
+-valuearrayfast_add_valuearrayfast(struct valuearrayfast *vaf,const struct valuearrayfast *vaf_add)
+-{
+-	valuearray_add_valuearray_fast(&vaf->va,vaf_add->va,vaf->num,vaf_add->num,&vaf->max,0/*Exact*/,0/*!PassIn*/);
+-	vaf->num+= vaf_add->num;
+-}
+-
+-/* <=========================== ValueArrayIndexTree =======================> */
+-
+-static int valuetree_dupvalue_disallow( caddr_t d1, caddr_t d2 );
+-static int valuetree_node_cmp( caddr_t d1, caddr_t d2 );
+-static int valuetree_node_free( caddr_t data );
+-
+-/*
+- * structure used within AVL value trees.
+- */
+-typedef struct valuetree_node
+-{
+-    int	index; /* index into the value array */
+-    Slapi_Value *sval; /* the actual value */
+-} valuetree_node;
+-
+-/*
+- * Create or update an AVL tree of values that can be used to speed up value
+- *	lookups.  We store the index keys for the values in the AVL tree so
+- *	we can use a trivial comparison function.
+- *
+- * Returns:
+- *  LDAP_SUCCESS on success,
+- *  LDAP_TYPE_OR_VALUE_EXISTS if the value already exists,
+- *  LDAP_OPERATIONS_ERROR for some unexpected failure.
+- *
+- * Sets *valuetreep to the root of the AVL tree that was created.  If a
+- *	non-zero value is returned, the tree is freed if free_on_error is non-zero
+- *  and *valuetreep is set to NULL.
+- */
+-int
+-valuetree_add_valuearray( const Slapi_Attr *sattr, Slapi_Value **va, Avlnode **valuetreep, int *duplicate_index )
+-{
+-	int rc= LDAP_SUCCESS;
+-
+-	PR_ASSERT(sattr!=NULL);
+-	PR_ASSERT(valuetreep!=NULL);
+-
+-	if ( duplicate_index ) {
+-		*duplicate_index = -1;
+-	}
+-
+-	if ( !valuearray_isempty(va) )
+-	{
+-		Slapi_Value	**keyvals;
+-		/* Convert the value array into key values */
+-		if ( slapi_attr_values2keys_sv( sattr, (Slapi_Value**)va, &keyvals, LDAP_FILTER_EQUALITY ) != 0 ) /* jcm cast */
+-		{
+-			LDAPDebug( LDAP_DEBUG_ANY,"slapi_attr_values2keys_sv for attribute %s failed\n", sattr->a_type, 0, 0 );
+-			rc= LDAP_OPERATIONS_ERROR;
+-		}
+-		else
+-		{
+-			int	i;
+-			valuetree_node *vaip;
+-			for ( i = 0; rc==LDAP_SUCCESS && va[i] != NULL; ++i )
+-			{
+-				if ( keyvals[i] == NULL )
+-				{
+-					LDAPDebug( LDAP_DEBUG_ANY,"slapi_attr_values2keys_sv for attribute %s did not return enough key values\n", sattr->a_type, 0, 0 );
+-					rc= LDAP_OPERATIONS_ERROR;
+-				}
+-				else
+-				{
+-					vaip = (valuetree_node *)slapi_ch_malloc( sizeof( valuetree_node ));
+-					vaip->index = i;
+-					vaip->sval = keyvals[i];
+-					if (( rc = avl_insert( valuetreep, vaip, valuetree_node_cmp, valuetree_dupvalue_disallow )) != 0 )
+-					{
+-						slapi_ch_free( (void **)&vaip );
+-						/* Value must already be in there */
+-						rc= LDAP_TYPE_OR_VALUE_EXISTS;
+-						if ( duplicate_index ) {
+-							*duplicate_index = i;
+-						}
+-					}
+-					else
+-					{
+-						keyvals[i]= NULL;
+-					}
+-				}
+-			}
+-			/* start freeing at index i - the rest of them have already
+-			   been moved into valuetreep
+-			   the loop iteration will always do the +1, so we have
+-			   to remove it if so */
+-			i = (i > 0) ? i-1 : 0;
+-			valuearray_free_ext( &keyvals, i );
+-		}
+-	}
+-	if(rc!=0)
+-	{
+-		valuetree_free( valuetreep );
+-	}
+-
+-	return rc;
+-}
+-
+-int
+-valuetree_add_value( const Slapi_Attr *sattr, const Slapi_Value *v, Avlnode **valuetreep)
+-{
+-    Slapi_Value *va[2];
+-    va[0]= (Slapi_Value*)v;
+-    va[1]= NULL;
+-	return valuetree_add_valuearray( sattr, va, valuetreep, NULL);
+-}
+-
+-
+-/*
+- * 
+- * Find value "v" using AVL tree "valuetree"
+- *
+- * returns LDAP_SUCCESS if "v" was found, LDAP_NO_SUCH_ATTRIBUTE
+- *	if "v" was not found and LDAP_OPERATIONS_ERROR if some unexpected error occurs.
+- */
+-static int
+-valuetree_find( const struct slapi_attr *a, const Slapi_Value *v, Avlnode *valuetree, int *index)
+-{
+-	const Slapi_Value *oneval[2];
+-	Slapi_Value **keyvals;
+-	valuetree_node *vaip, tmpvain;
+-
+-	PR_ASSERT(a!=NULL);
+-	PR_ASSERT(a->a_plugin!=NULL);
+-	PR_ASSERT(v!=NULL);
+-	PR_ASSERT(valuetree!=NULL);
+-	PR_ASSERT(index!=NULL);
+-
+-	if ( a == NULL || v == NULL || valuetree == NULL )
+-	{
+-		return( LDAP_OPERATIONS_ERROR );
+-	}
+- 
+-	keyvals = NULL;
+-	oneval[0] = v;
+-	oneval[1] = NULL;
+-	if ( slapi_attr_values2keys_sv( a, (Slapi_Value**)oneval, &keyvals, LDAP_FILTER_EQUALITY ) != 0 /* jcm cast */
+-	    || keyvals == NULL
+-	    || keyvals[0] == NULL )
+-	{
+-		LDAPDebug( LDAP_DEBUG_ANY, "valuetree_find_and_replace: "
+-		    "slapi_attr_values2keys_sv failed for type %s\n",
+-		    a->a_type, 0, 0 );
+-		return( LDAP_OPERATIONS_ERROR );
+-	}
+-
+-	tmpvain.index = 0;
+-	tmpvain.sval = keyvals[0];
+-	vaip = (valuetree_node *)avl_find( valuetree, &tmpvain, valuetree_node_cmp );
+-
+-	if ( keyvals != NULL )
+-	{
+-		valuearray_free( &keyvals );
+-	}
+-
+-	if (vaip == NULL)
+-	{
+-		return( LDAP_NO_SUCH_ATTRIBUTE );
+-	}
+-	else
+-	{
+-		*index= vaip->index;
+-	}
+-
+-	return( LDAP_SUCCESS );
+-}
+-
+-static int
+-valuetree_dupvalue_disallow( caddr_t d1, caddr_t d2 )
+-{
+-	return( 1 );
+-}
+-
+-
+-void
+-valuetree_free( Avlnode **valuetreep )
+-{
+-	if ( valuetreep != NULL && *valuetreep != NULL )
+-	{
+-		avl_free( *valuetreep, valuetree_node_free );
+-		*valuetreep = NULL;
+-	}
+-}
+-
+-
+-static int
+-valuetree_node_free( caddr_t data )
+-{
+-	if ( data!=NULL )
+-	{
+-		valuetree_node *vaip = (valuetree_node *)data;
+-
+-                slapi_value_free(&vaip->sval);
+-	    	slapi_ch_free( (void **)&data );
+-	}
+-	return( 0 );	
+-}
+-
+-
+-static int
+-valuetree_node_cmp( caddr_t d1, caddr_t d2 )
+-{
+-        const struct berval *bv1, *bv2;
+-	int			rc;
+-
+-        bv1 = slapi_value_get_berval(((valuetree_node *)d1)->sval);
+-        bv2 = slapi_value_get_berval(((valuetree_node *)d2)->sval);
+-
+-	if ( bv1->bv_len < bv2->bv_len ) {
+-		rc = -1;
+-	} else if ( bv1->bv_len > bv2->bv_len ) {
+-		rc = 1;
+-	} else {
+-		rc = memcmp( bv1->bv_val, bv2->bv_val, bv1->bv_len );
+-	}
+-
+-	return( rc );
+-}
+-
+ /* <=========================== Value Set =======================> */
+ 
+-/*
+- *  JCM: All of these valueset functions are just forwarded to the
+- *  JCM: valuearray functions... waste of time. Inline them!
+- */
++#define VALUESET_ARRAY_SORT_THRESHOLD 10
++#define VALUESET_ARRAY_MINSIZE 2
++#define VALUESET_ARRAY_MAXINCREMENT 4096
+ 
+ Slapi_ValueSet *
+ slapi_valueset_new()
+@@ -832,6 +562,9 @@ slapi_valueset_init(Slapi_ValueSet *vs)
+ 	if(vs!=NULL)
+ 	{
+ 		vs->va= NULL;
++		vs->sorted = NULL;
++		vs->num = 0;
++		vs->max = 0;
+ 	}
+ }
+ 
+@@ -845,6 +578,13 @@ slapi_valueset_done(Slapi_ValueSet *vs)
+ 			valuearray_free(&vs->va);
+ 			vs->va= NULL;
+ 		}
++		if (vs->sorted != NULL) 
++		{
++			slapi_ch_free ((void **)&vs->sorted);
++			vs->sorted = NULL;
++		}
++		vs->num = 0;
++		vs->max = 0;
+ 	}
+ }
+ 
+@@ -869,8 +609,22 @@ slapi_valueset_set_from_smod(Slapi_ValueSet *vs, Slapi_Mod *smod)
+ void
+ valueset_set_valuearray_byval(Slapi_ValueSet *vs, Slapi_Value **addvals)
+ {
+-	slapi_valueset_init(vs);
+-	valueset_add_valuearray(vs,addvals);
++	int i, j=0;
++ 	slapi_valueset_init(vs);
++	vs->num = valuearray_count(addvals);
++	vs->max = vs->num + 1;
++	vs->va = (Slapi_Value **) slapi_ch_malloc( vs->max * sizeof(Slapi_Value *));
++	for ( i = 0, j = 0; i < vs->num; i++)
++	{
++		if ( addvals[i]!=NULL )
++		{
++			/* We copy the values */
++			vs->va[j] = slapi_value_dup(addvals[i]);
++			j++;
++		}
++	}
++	vs->va[j] = NULL;
++
+ }
+ 
+ void
+@@ -878,6 +632,8 @@ valueset_set_valuearray_passin(Slapi_ValueSet *vs, Slapi_Value **addvals)
+ {
+ 	slapi_valueset_init(vs);
+ 	vs->va= addvals;
++	vs->num = valuearray_count(addvals);
++	vs->max = vs->num + 1;
+ }
+ 
+ void
+@@ -887,6 +643,15 @@ slapi_valueset_set_valueset(Slapi_ValueSet *vs1, const Slapi_ValueSet *vs2)
+ 	valueset_add_valueset(vs1,vs2);
+ }
+ 
++void
++slapi_valueset_join_attr_valueset(const Slapi_Attr *a, Slapi_ValueSet *vs1, const Slapi_ValueSet *vs2)
++{
++	if (slapi_valueset_isempty(vs1))
++		valueset_add_valueset(vs1,vs2);
++	else
++		slapi_valueset_add_attr_valuearray_ext (a, vs1, vs2->va, vs2->num, 0, NULL);
++}
++
+ int
+ slapi_valueset_first_value( Slapi_ValueSet *vs, Slapi_Value **v )
+ {
+@@ -914,21 +679,21 @@ slapi_valueset_next_value( Slapi_ValueSet *vs, int index, Slapi_Value **v)
+ int
+ slapi_valueset_count( const Slapi_ValueSet *vs)
+ {
+-	int r=0;
+ 	if (NULL != vs)
+ 	{
+-		if(!valuearray_isempty(vs->va))
+-		{
+-			r= valuearray_count(vs->va);
+-		}
++		return (vs->num);
+ 	}
+-	return r;
++	return 0;
+ }
+ 
+ int
+-slapi_valueset_isempty(const Slapi_ValueSet *vs)
++slapi_valueset_isempty( const Slapi_ValueSet *vs)
+ {
+-	return valueset_isempty(vs);
++	if (NULL != vs)
++	{
++		return (vs->num == 0);
++	}
++	return 1;
+ }
+ 
+ int
+@@ -945,12 +710,14 @@ Slapi_Value *
+ slapi_valueset_find(const Slapi_Attr *a, const Slapi_ValueSet *vs, const Slapi_Value *v)
+ {
+ 	Slapi_Value *r= NULL;
+-	if(vs && !valuearray_isempty(vs->va))
+-	{
+-		int i= valuearray_find(a,vs->va,v);
+-		if(i!=-1)
+-		{
+-			r= vs->va[i];
++	if(vs->num > 0) {
++		if (vs->sorted) {
++			r = valueset_find_sorted(a,vs,v,NULL);
++		} else {
++			int i= valuearray_find(a,vs->va,v);
++			if(i!=-1) {
++				r= vs->va[i];
++			}
+ 		}
+ 	}
+ 	return r;
+@@ -959,17 +726,46 @@ slapi_valueset_find(const Slapi_Attr *a, const Slapi_ValueSet *vs, const Slapi_V
+ /*
+  * The value is found in the set, removed and returned.
+  * The caller is responsible for freeing the value.
++ *
++ * The _sorted function also handles the cleanup of the sorted array
+  */
+ Slapi_Value *
+-valueset_remove_value(const Slapi_Attr *a, Slapi_ValueSet *vs, const Slapi_Value *v)
++valueset_remove_value_sorted(const Slapi_Attr *a, Slapi_ValueSet *vs, const Slapi_Value *v)
+ {
+ 	Slapi_Value *r= NULL;
+-	if(!valuearray_isempty(vs->va))
+-	{
+-		r= valuearray_remove_value(a, vs->va, v);
++	int i, position = 0;
++	r = valueset_find_sorted(a,vs,v,&position);
++	if (r) {
++		/* the value was found, remove from valuearray */
++		int index = vs->sorted[position];
++		memmove(&vs->sorted[position],&vs->sorted[position+1],(vs->num - position)*sizeof(int));
++		memmove(&vs->va[index],&vs->va[index+1],(vs->num - index)*sizeof(Slapi_Value *));
++		vs->num--;
++		/* unfortunately the references in the sorted array 
++		 * to values past the removed one are no longer correct
++		 * need to adjust */
++		for (i=0; i < vs->num; i++) {
++			if (vs->sorted[i] > index) vs->sorted[i]--;
++		}
+ 	}
+ 	return r;
+ }
++Slapi_Value *
++valueset_remove_value(const Slapi_Attr *a, Slapi_ValueSet *vs, const Slapi_Value *v)
++{
++	if (vs->sorted) {
++		return (valueset_remove_value_sorted(a, vs, v));
++	} else {
++		Slapi_Value *r= NULL;
++		if(!valuearray_isempty(vs->va))
++		{
++			r= valuearray_remove_value(a, vs->va, v);
++			if (r)
++				vs->num--;
++		}
++		return r;
++	}
++}
+ 
+ /* 
+  * Remove any values older than the CSN.
+@@ -978,11 +774,25 @@ int
+ valueset_purge(Slapi_ValueSet *vs, const CSN *csn)
+ {
+ 	int r= 0;
+-	if(!valuearray_isempty(vs->va))
+-	{
++ 	if(!valuearray_isempty(vs->va)) {
++		/* valuearray_purge is not valueset and sorting aware,
++		 * maybe need to rewrite, at least keep the valueset 
++		 * consistent
++		 */
+ 		r= valuearray_purge(&vs->va, csn);
++		vs->num = r;
++		if (vs->va == NULL) {
++			/* va was freed */
++			vs->max = 0;
++		}
++		/* we can no longer rely on the sorting */
++		if (vs->sorted != NULL) 
++		{
++			slapi_ch_free ((void **)&vs->sorted);
++			vs->sorted = NULL;
++		}
+ 	}
+-	return r;
++	return 0;
+ }
+ 
+ Slapi_Value **
+@@ -1005,11 +815,20 @@ valueset_size(const Slapi_ValueSet *vs)
+  * The value array is passed in by value.
+  */
+ void
++slapi_valueset_add_valuearray(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **addvals)
++{
++	if(!valuearray_isempty(addvals))
++	{
++		slapi_valueset_add_attr_valuearray_ext (a, vs, addvals, valuearray_count(addvals), 0, NULL);
++	}
++}
++
++void
+ valueset_add_valuearray(Slapi_ValueSet *vs, Slapi_Value **addvals)
+ {
+ 	if(!valuearray_isempty(addvals))
+ 	{
+-		valuearray_add_valuearray(&vs->va, addvals, 0);
++		slapi_valueset_add_attr_valuearray_ext (NULL, vs, addvals, valuearray_count(addvals), 0, NULL);
+ 	}
+ }
+ 
+@@ -1018,7 +837,7 @@ valueset_add_valuearray_ext(Slapi_ValueSet *vs, Slapi_Value **addvals, PRUint32
+ {
+ 	if(!valuearray_isempty(addvals))
+ 	{
+-		valuearray_add_valuearray(&vs->va, addvals, flags);
++		slapi_valueset_add_attr_valuearray_ext (NULL, vs, addvals, valuearray_count(addvals), flags, NULL);
+ 	}
+ }
+ 
+@@ -1028,28 +847,281 @@ valueset_add_valuearray_ext(Slapi_ValueSet *vs, Slapi_Value **addvals, PRUint32
+ void
+ slapi_valueset_add_value(Slapi_ValueSet *vs, const Slapi_Value *addval)
+ {
+-     valuearray_add_value(&vs->va,addval);
++	slapi_valueset_add_value_ext(vs, addval, 0);
++}
++
++void
++slapi_valueset_add_value_ext(Slapi_ValueSet *vs, const Slapi_Value *addval, unsigned long flags)
++{
++	Slapi_Value *oneval[2];
++	oneval[0]= (Slapi_Value*)addval;
++	oneval[1]= NULL;
++	slapi_valueset_add_attr_valuearray_ext(NULL, vs, oneval, 1, flags, NULL);
++}
++
++
++/* find value v in the sorted array of values, using syntax of attribut a for comparison 
++ *
++ */
++static int
++valueset_value_syntax_cmp( const Slapi_Attr *a, const Slapi_Value *v1, const Slapi_Value *v2 )
++{
++	/* this looks like a huge overhead, but there are no simple functions to normalize and
++	 * compare available
++	 */
++	const Slapi_Value *oneval[3];
++	Slapi_Value **keyvals;
++	int rc = -1;
++
++	keyvals = NULL;
++	oneval[0] = v1;
++	oneval[1] = v2;
++	oneval[2] = NULL;
++	if ( slapi_attr_values2keys_sv( a, (Slapi_Value**)oneval, &keyvals, LDAP_FILTER_EQUALITY ) != 0
++	    || keyvals == NULL
++	    || keyvals[0] == NULL || keyvals[1] == NULL)
++	{
++		/* this should never happen since always a syntax plugin to
++		 * generate the keys will be found (there exists a default plugin)
++		 * log an error and continue.
++		 */
++		LDAPDebug( LDAP_DEBUG_ANY, "valueset_value_syntax_cmp: "
++		    "slapi_attr_values2keys_sv failed for type %s\n",
++		    a->a_type, 0, 0 );
++	} else {
++		struct berval *bv1, *bv2;
++		bv1 = &keyvals[0]->bv;
++		bv2 = &keyvals[1]->bv;
++		if ( bv1->bv_len < bv2->bv_len ) {
++			rc = -1;
++		} else if ( bv1->bv_len > bv2->bv_len ) {
++			rc = 1;
++		} else {
++			rc = memcmp( bv1->bv_val, bv2->bv_val, bv1->bv_len );
++		}
++	}
++	if (keyvals != NULL)
++		valuearray_free( &keyvals );
++	return (rc);
++
++} 
++static int
++valueset_value_cmp( const Slapi_Attr *a, const Slapi_Value *v1, const Slapi_Value *v2 )
++{
++
++	if ( a == NULL || slapi_attr_is_dn_syntax_attr((Slapi_Attr *)a)) {
++		/* if no attr is provided just do a utf8compare */
++		/* for all the values the first step of normalization is done, 
++		 * case folding still needs to be done
++		 */
++		/* would this be enough ?: return (strcasecmp(v1->bv.bv_val, v2->bv.bv_val)); */
++		return (slapi_utf8casecmp((unsigned char*)v1->bv.bv_val, (unsigned char*)v2->bv.bv_val));
++	} else {
++		/* slapi_value_compare doesn't work, it only returns 0 or -1
++		return (slapi_value_compare(a, v1, v2));
++		* use special compare, base on what valuetree_find did 
++		*/
++		return(valueset_value_syntax_cmp(a, v1, v2));
++	}
++}
++/* find a value in the sorted valuearray. 
++ * If the value is found the pointer to the value is returned and if index is provided
++ * it will return the index of the value in the valuearray
++ * If the value is not found, index will contain the place where the value would be inserted
++ */
++Slapi_Value *
++valueset_find_sorted (const Slapi_Attr *a, const Slapi_ValueSet *vs, const Slapi_Value *v, int *index)
++{
++	int cmp = -1;
++	int bot = -1;
++	int top;
++	
++	if (vs->num == 0) {
++		/* empty valueset */
++		if (index) *index = 0;
++		return (NULL);
++	} else {
++		top = vs->num;
++	}
++	while (top - bot > 1) {
++		int mid = (top + bot)/2;
++		if ( (cmp = valueset_value_cmp(a, v, vs->va[vs->sorted[mid]])) > 0)
++			bot = mid;
++		else
++			top = mid;
++	}
++	if (index) *index = top;
++	/* check if the value is found */
++	if ( top < vs->num && (0 == valueset_value_cmp(a, v, vs->va[vs->sorted[top]]))) 
++		return (vs->va[vs->sorted[top]]);
++	else
++		return (NULL);
+ }
+ 
+ void
+-slapi_valueset_add_value_ext(Slapi_ValueSet *vs, Slapi_Value *addval, unsigned long flags)
++valueset_array_to_sorted (const Slapi_Attr *a, Slapi_ValueSet *vs)
++{
++	int i, j, swap;
++
++	/* initialize sort array */
++	for (i = 0; i < vs->num; i++)
++		vs->sorted[i] = i;
++
++	/* now sort it, use a simple insertion sort as the array will always
++	 * be very small when initially sorted
++	 */
++	for (i = 1; i < vs->num; i++) {
++		swap = vs->sorted[i];
++		j = i -1;
++
++		while ( j >= 0 && valueset_value_cmp (a, vs->va[vs->sorted[j]], vs->va[swap]) > 0 ) {
++			vs->sorted[j+1] = vs->sorted[j];
++			j--;
++		}
++		vs->sorted[j+1] = swap;
++	}
++}
++/* insert a value into a sorted array, if dupcheck is set no duplicate values will be accepted 
++ * (is there a reason to allow duplicates ? LK
++ * if the value is inserted the the function returns the index where it was inserted
++ * if the value already exists -index is returned to indicate anerror an the index of the existing value
++ */
++int
++valueset_insert_value_to_sorted(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value *vi, int dupcheck)
++{
++	int index = -1;
++	Slapi_Value *v;
++	/* test for pre sorted array and to avoid boundary condition */
++	if (vs->num == 0) {
++		vs->sorted[0] = 0;
++		vs->num++;
++		return(0);
++	} else if (valueset_value_cmp (a, vi, vs->va[vs->sorted[vs->num-1]]) > 0 )  {
++		vs->sorted[vs->num] = vs->num;
++		vs->num++; 
++		return (vs->num);
++	}
++	v = valueset_find_sorted (a, vs, vi, &index);
++	if (v && dupcheck) {
++		/* value already exists, do not insert duplicates */
++		return (-1);
++	} else {
++		memmove(&vs->sorted[index+1],&vs->sorted[index],(vs->num - index)* sizeof(int));
++		vs->sorted[index] = vs->num;
++		vs->num++; 
++		return(index);
++	}
++		
++}
++
++int
++slapi_valueset_add_attr_valuearray_ext(const Slapi_Attr *a, Slapi_ValueSet *vs, 
++					Slapi_Value **addvals, int naddvals, unsigned long flags, int *dup_index)
++{
++	int rc = LDAP_SUCCESS;
++	int i, dup;
++	int allocate = 0;
++	int need;
++	int passin = flags & SLAPI_VALUE_FLAG_PASSIN;
++	int dupcheck = flags & SLAPI_VALUE_FLAG_DUPCHECK;
++
++	if (naddvals == 0) 
++		return (rc);
++	
++	need = vs->num + naddvals + 1;
++	if (need > vs->max) {
++		/* Expand the array */
++		allocate= vs->max;
++		if ( allocate == 0 ) /* initial allocation */
++			allocate = VALUESET_ARRAY_MINSIZE;
++		while ( allocate < need )
++		{
++			if (allocate > VALUESET_ARRAY_MAXINCREMENT ) 
++				/* do not grow exponentially */
++				allocate += VALUESET_ARRAY_MAXINCREMENT;
++			else
++				allocate *= 2;
++	
++		}
++	}
++	if(allocate>0)
++	{
++		if(vs->va==NULL)
++		{
++			vs->va = (Slapi_Value **) slapi_ch_malloc( allocate * sizeof(Slapi_Value *));
++		}
++		else
++		{
++			vs->va = (Slapi_Value **) slapi_ch_realloc( (char *) vs->va, allocate * sizeof(Slapi_Value *));
++			if (vs->sorted) {
++				vs->sorted = (int *) slapi_ch_realloc( (char *) vs->sorted, allocate * sizeof(int));
++			}
++		}
++		vs->max= allocate;
++	}
++
++	if ( (vs->num + naddvals > VALUESET_ARRAY_SORT_THRESHOLD || dupcheck ) && 
++		!vs->sorted ) {
++		/* initialize sort array and do initial sort */
++		vs->sorted = (int *) slapi_ch_malloc( vs->max* sizeof(int));
++		valueset_array_to_sorted (a, vs);
++	}
++
++	for ( i = 0; i < naddvals; i++)
++	{
++		if ( addvals[i]!=NULL )
++		{
++			if(passin)
++			{
++				/* We consume the values */
++			    (vs->va)[vs->num] = addvals[i];
++			}
++			else
++			{
++				/* We copy the values */
++			    (vs->va)[vs->num] = slapi_value_dup(addvals[i]);
++			}
++			if (vs->sorted) {
++				dup = valueset_insert_value_to_sorted(a, vs, (vs->va)[vs->num], dupcheck);
++				if (dup < 0 ) {
++					rc = LDAP_TYPE_OR_VALUE_EXISTS;
++					if (dup_index) *dup_index = i;
++					if ( !passin) 
++						slapi_value_free(&(vs->va)[vs->num]);
++					break;
++				}
++			} else {
++				vs->num++;
++			}
++		}
++	}
++	(vs->va)[vs->num] = NULL;
++
++	return (rc); 
++}
++
++int
++slapi_valueset_add_attr_value_ext(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value *addval, unsigned long flags)
+ {
++
+ 	Slapi_Value *oneval[2];
++	int rc;
+ 	oneval[0]= (Slapi_Value*)addval;
+ 	oneval[1]= NULL;
+-	valuearray_add_valuearray(&vs->va, oneval, flags);
++	rc = slapi_valueset_add_attr_valuearray_ext(a, vs, oneval, 1, flags, NULL );
++	return (rc);
+ }
+ 
+ /*
+  * The string is passed in by value.
+  */
+ void
+-valueset_add_string(Slapi_ValueSet *vs, const char *s, CSNType t, const CSN *csn)
++valueset_add_string(const Slapi_Attr *a, Slapi_ValueSet *vs, const char *s, CSNType t, const CSN *csn)
+ {
+ 	Slapi_Value v;
+ 	value_init(&v,NULL,t,csn);
+ 	slapi_value_set_string(&v,s);
+-    valuearray_add_value(&vs->va,&v);
++	slapi_valueset_add_attr_value_ext(a, vs, &v, 0 );
+ 	value_done(&v);
+ }
+ 
+@@ -1059,8 +1131,30 @@ valueset_add_string(Slapi_ValueSet *vs, const char *s, CSNType t, const CSN *csn
+ void
+ valueset_add_valueset(Slapi_ValueSet *vs1, const Slapi_ValueSet *vs2)
+ {
+-	if (vs1 && vs2)
+-		valueset_add_valuearray(vs1, vs2->va);
++	int i;
++
++	if (vs1 && vs2) {
++		if (vs2->va) {
++			/* need to copy valuearray */
++			if (vs2->max == 0) {
++				/* temporary hack, not all valuesets were created properly. fix it now */
++				vs1->num = valuearray_count(vs2->va);
++				vs1->max = vs1->num + 1;
++			} else {
++				vs1->num = vs2->num;
++				vs1->max = vs2->max;
++			}
++			vs1->va = (Slapi_Value **) slapi_ch_malloc( vs1->max * sizeof(Slapi_Value *));
++			for (i=0; i< vs1->num;i++) {
++				vs1->va[i] = slapi_value_dup(vs2->va[i]);
++			}
++			vs1->va[vs1->num] = NULL;
++		}
++		if (vs2->sorted) {
++			vs1->sorted = (int *) slapi_ch_malloc( vs1->max* sizeof(int));
++			memcpy(&vs1->sorted[0],&vs2->sorted[0],vs1->num* sizeof(int));
++		}
++	}
+ }
+ 
+ void
+@@ -1070,7 +1164,7 @@ valueset_remove_string(const Slapi_Attr *a, Slapi_ValueSet *vs, const char *s)
+ 	Slapi_Value *removed;
+ 	value_init(&v,NULL,CSN_TYPE_NONE,NULL);
+ 	slapi_value_set_string(&v,s);
+-	removed = valuearray_remove_value(a, vs->va, &v);
++	removed = valueset_remove_value(a, vs, &v);
+ 	if(removed) {
+ 		slapi_value_free(&removed);
+ 	}
+@@ -1109,158 +1203,59 @@ int
+ valueset_remove_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slapi_Value **valuestodelete, int flags, Slapi_Value ***va_out)
+ {
+ 	int rc= LDAP_SUCCESS;
+-	if(!valuearray_isempty(vs->va))
++	if(vs->num > 0)
+ 	{
+-		int numberofvaluestodelete= valuearray_count(valuestodelete);
++		int i;
+ 		struct valuearrayfast vaf_out;
++
+ 		if ( va_out )
+ 		{
+ 			valuearrayfast_init(&vaf_out,*va_out);
+ 		}
+ 
+ 		/*
+-		 * If there are more then one values, build an AVL tree to check
+-		 * the duplicated values.
++		 * For larger valuesets the valuarray is sorted, values can be deleted individually
++		 *
+ 		 */
+-		if ( numberofvaluestodelete > 1 )
++		for ( i = 0; rc==LDAP_SUCCESS && valuestodelete[i] != NULL; ++i )
+ 		{
+-			/*
+-			 * Several values to delete: first build an AVL tree that
+-			 * holds all of the existing values and use that to find
+-			 * the values we want to delete.
+-			 */
+-			Avlnode	*vtree = NULL;
+-			int numberofexistingvalues= slapi_valueset_count(vs);
+-			rc= valuetree_add_valuearray( a, vs->va, &vtree, NULL );
+-			if ( rc!=LDAP_SUCCESS )
+-			{
+-				/*
+-				 * failed while constructing AVL tree of existing
+-				 * values... something bad happened.
+-				 */
+-				rc= LDAP_OPERATIONS_ERROR;
+-			}
+-			else
++			Slapi_Value *found = valueset_remove_value(a, vs, valuestodelete[i]);
++			if(found!=NULL)
+ 			{
+-				int i;
+-				/*
+-				 * find and mark all the values that are to be deleted
+-				 */
+-				for ( i = 0; rc == LDAP_SUCCESS && valuestodelete[i] != NULL; ++i )
++				if ( va_out )
+ 				{
+-					int index= 0;
+-					rc = valuetree_find( a, valuestodelete[i], vtree, &index );
+-					if(rc==LDAP_SUCCESS)
+-					{
+-						if(vs->va[index]!=NULL)
+-						{
+-							/* Move the value to be removed to the out array */
+-							if ( va_out )
+-							{
+-								if (vs->va[index]->v_csnset &&
+-									(flags & (SLAPI_VALUE_FLAG_PRESERVECSNSET|
+-                                              SLAPI_VALUE_FLAG_USENEWVALUE)))
+-								{
+-									valuestodelete[i]->v_csnset = csnset_dup (vs->va[index]->v_csnset);
+-								}
+-								if (flags & SLAPI_VALUE_FLAG_USENEWVALUE)
+-								{
+-									valuearrayfast_add_value_passin(&vaf_out,valuestodelete[i]);
+-									valuestodelete[i] = vs->va[index];
+-									vs->va[index] = NULL;
+-								}
+-								else
+-								{
+-									valuearrayfast_add_value_passin(&vaf_out,vs->va[index]);
+-									vs->va[index] = NULL;
+-								}
+-							}
+-							else
+-							{
+-								if (flags & SLAPI_VALUE_FLAG_PRESERVECSNSET)
+-								{
+-									valuestodelete[i]->v_csnset = vs->va[index]->v_csnset;
+-									vs->va[index]->v_csnset = NULL;
+-								}
+-								slapi_value_free ( & vs->va[index] );
+-							}
+-						}
+-						else
+-						{
+-							/* We already deleted this value... */
+-							if((flags & SLAPI_VALUE_FLAG_IGNOREERROR) == 0)
+-							{
+-								/* ...that's an error. */
+-								rc= LDAP_NO_SUCH_ATTRIBUTE;
+-							}
+-						}
+-					}
+-					else
++					if (found->v_csnset &&
++						(flags & (SLAPI_VALUE_FLAG_PRESERVECSNSET|
++               				                       SLAPI_VALUE_FLAG_USENEWVALUE)))
+ 					{
+-						/* Couldn't find the value to be deleted */
+-						if(rc==LDAP_NO_SUCH_ATTRIBUTE && (flags & SLAPI_VALUE_FLAG_IGNOREERROR ))
+-						{
+-							rc= LDAP_SUCCESS;
+-						}
++						valuestodelete[i]->v_csnset = csnset_dup (found->v_csnset);
+ 					}
+-				}
+-				valuetree_free( &vtree );
+-
+-				if ( rc != LDAP_SUCCESS )
+-				{
+-					LDAPDebug( LDAP_DEBUG_ANY,"could not find value %d for attr %s (%s)\n", i-1, a->a_type, ldap_err2string( rc ));
+-				}
+-				else
+-				{
+-					/* Shunt up all the remaining values to cover the deleted ones. */
+-					valuearray_compress(vs->va,numberofexistingvalues);
+-				}
+-			}
+-		}
+-		else
+-		{
+-			/* We delete one or no value, so we use brute force. */
+-			int i;
+-			for ( i = 0; rc==LDAP_SUCCESS && valuestodelete[i] != NULL; ++i )
+-			{
+-				Slapi_Value *found= valueset_remove_value(a, vs, valuestodelete[i]);
+-				if(found!=NULL)
+-				{
+-					if ( va_out )
++					if (flags & SLAPI_VALUE_FLAG_USENEWVALUE)
+ 					{
+-						if (found->v_csnset &&
+-							(flags & (SLAPI_VALUE_FLAG_PRESERVECSNSET|
+-                                      SLAPI_VALUE_FLAG_USENEWVALUE)))
+-						{
+-							valuestodelete[i]->v_csnset = csnset_dup (found->v_csnset);
+-						}
+-						if (flags & SLAPI_VALUE_FLAG_USENEWVALUE)
+-						{
+-							valuearrayfast_add_value_passin(&vaf_out,valuestodelete[i]);
+-							valuestodelete[i] = found;
+-						}
+-						else
+-						{
+-							valuearrayfast_add_value_passin(&vaf_out,found);
+-						}
++						valuearrayfast_add_value_passin(&vaf_out,valuestodelete[i]);
++						valuestodelete[i] = found;
+ 					}
+ 					else
+ 					{
+-						if (flags & SLAPI_VALUE_FLAG_PRESERVECSNSET)
+-						{
+-							valuestodelete[i]->v_csnset = found->v_csnset;
+-							found->v_csnset = NULL;
+-						}
+-						slapi_value_free ( & found );
++						valuearrayfast_add_value_passin(&vaf_out,found);
+ 					}
+ 				}
+ 				else
+ 				{
+-					if((flags & SLAPI_VALUE_FLAG_IGNOREERROR) == 0)
++					if (flags & SLAPI_VALUE_FLAG_PRESERVECSNSET)
+ 					{
+-						LDAPDebug( LDAP_DEBUG_ARGS,"could not find value %d for attr %s\n", i-1, a->a_type, 0 );
+-						rc= LDAP_NO_SUCH_ATTRIBUTE;
++						valuestodelete[i]->v_csnset = found->v_csnset;
++						found->v_csnset = NULL;
+ 					}
++					slapi_value_free ( & found );
++				}
++			}
++			else
++			{
++				if((flags & SLAPI_VALUE_FLAG_IGNOREERROR) == 0)
++				{
++					LDAPDebug( LDAP_DEBUG_ARGS,"could not find value %d for attr %s\n", i-1, a->a_type, 0 );
++					rc= LDAP_NO_SUCH_ATTRIBUTE;
+ 				}
+ 			}
+ 		}
+@@ -1276,88 +1271,13 @@ valueset_remove_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slapi_Value
+ 	return rc;
+ }
+ 
+-/*
+- * Check if the set of values in the valueset and the valuearray intersect.
+- *
+- * Returns
+- *  LDAP_SUCCESS - No intersection.
+- *  LDAP_NO_SUCH_ATTRIBUTE - There is an intersection.
+- *  LDAP_OPERATIONS_ERROR - There are duplicate values in the value set already.
+- */
+-int
+-valueset_intersectswith_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slapi_Value **values, int *duplicate_index )
+-{
+-	int rc= LDAP_SUCCESS;
+-
+-	if ( duplicate_index ) {
+-		*duplicate_index = -1;
+-	}
+-
+-	if(valuearray_isempty(vs->va))
+-	{
+-		/* No intersection */
+-	}
+-	else
+-	{
+-		int numberofvalues= valuearray_count(values);
+-		/*
+-		 * determine whether we should use an AVL tree of values or not
+-		 */
+-		if (numberofvalues==0)
+-		{
+-			/* No intersection */
+-		}
+-		else if ( numberofvalues > 1 )
+-		{
+-			/*
+-			 * Several values to add: use an AVL tree to detect duplicates.
+-			 */
+-			Avlnode	*vtree = NULL;
+-			rc= valuetree_add_valuearray( a, vs->va, &vtree, duplicate_index );
+-			if(rc==LDAP_OPERATIONS_ERROR)
+-			{
+-				/* There were already duplicate values in the value set */
+-			}
+-			else
+-			{
+-				rc= valuetree_add_valuearray( a, values, &vtree, duplicate_index );
+-				/*
+-				 * Returns LDAP_OPERATIONS_ERROR if something very bad happens.
+-				 * Or LDAP_TYPE_OR_VALUE_EXISTS if a value already exists.
+-				 */
+-			}
+-		    valuetree_free( &vtree );
+-		}
+-		else
+-		{
+-			/*
+-			 * One value to add: don't bother constructing
+-			 * an AVL tree, etc. since it probably isn't worth the time.
+-			 *
+-			 * JCM - This is actually quite slow because the comparison function is looked up many times.
+-			 */
+-			int i;
+-			for ( i = 0; rc == LDAP_SUCCESS && values[i] != NULL; ++i )
+-			{
+-				if(valuearray_find(a, vs->va, values[i])!=-1)
+-				{
+-					rc = LDAP_TYPE_OR_VALUE_EXISTS;
+-					*duplicate_index = i;
+-					break;
+-				}
+-			}
+-		}
+-	}
+-	return rc;
+-}
+-
+ Slapi_ValueSet *
+ valueset_dup(const Slapi_ValueSet *dupee)
+ {
+-	Slapi_ValueSet *duped= (Slapi_ValueSet *)slapi_ch_calloc(1,sizeof(Slapi_ValueSet));
++	Slapi_ValueSet *duped = slapi_valueset_new();
+ 	if (NULL!=duped)
+ 	{
+-		valueset_add_valuearray( duped, dupee->va );
++		valueset_set_valuearray_byval(duped,dupee->va);
+ 	}
+ 	return duped;
+ }
+@@ -1369,43 +1289,53 @@ valueset_dup(const Slapi_ValueSet *dupee)
+  *             : LDAP_OPERATIONS_ERROR - duplicated values given
+  */
+ int
+-valueset_replace(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **valstoreplace)
++valueset_replace_valuearray(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **valstoreplace)
++{
++	return (valueset_replace_valuearray_ext(a, vs,valstoreplace, 1));
++}
++int
++valueset_replace_valuearray_ext(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value **valstoreplace, int dupcheck)
+ {
+     int rc = LDAP_SUCCESS;
+-    int numberofvalstoreplace= valuearray_count(valstoreplace);
+-    /* verify the given values are not duplicated.
+-       if replacing with one value, no need to check.  just replace it.
+-     */
+-    if (numberofvalstoreplace > 1)
+-    {
+-        Avlnode *vtree = NULL;
+-        rc = valuetree_add_valuearray( a, valstoreplace, &vtree, NULL );
+-        valuetree_free(&vtree);
+-        if ( LDAP_SUCCESS != rc &&
+-             /* bz 247413: don't override LDAP_TYPE_OR_VALUE_EXISTS */
+-             LDAP_TYPE_OR_VALUE_EXISTS != rc )
+-        {
+-            /* There were already duplicate values in the value set */
+-            rc = LDAP_OPERATIONS_ERROR;
+-        }
+-    }
+-
+-    if ( rc == LDAP_SUCCESS )
+-    {
+-        /* values look good - replace the values in the attribute */
+-        if(!valuearray_isempty(vs->va))
+-        {
+-            /* remove old values */
+-            slapi_valueset_done(vs);
+-        }
+-        /* we now own valstoreplace */
+-        vs->va = valstoreplace;
+-    }
+-    else
+-    {
+-        /* caller expects us to own valstoreplace - since we cannot
+-           use them, just delete them */
+-        valuearray_free(&valstoreplace);
++    int vals_count = valuearray_count(valstoreplace);
++
++    if (vals_count == 0) {
++	/* no new values, just clear the valueset */
++	slapi_valueset_done(vs);
++    } else if (vals_count == 1 || !dupcheck) {
++	/* just repelace the valuearray and adjus num, max */
++	slapi_valueset_done(vs);
++	vs->va = valstoreplace;
++	vs->num = vals_count;
++	vs->max = vals_count + 1;
++    } else {
++	/* verify the given values are not duplicated.  */
++	Slapi_ValueSet *vs_new = slapi_valueset_new();
++	rc = slapi_valueset_add_attr_valuearray_ext (a, vs_new, valstoreplace, vals_count, 0, NULL);
++
++	if ( rc == LDAP_SUCCESS )
++	{
++		/* values look good - replace the values in the attribute */
++        	if(!valuearray_isempty(vs->va))
++        	{
++            		/* remove old values */
++            		slapi_valueset_done(vs);
++        	}
++        	vs->va = vs_new->va;
++		vs_new->va = NULL;
++        	vs->sorted = vs_new->sorted;
++		vs_new->sorted = NULL;
++        	vs->num = vs_new->num;
++        	vs->max = vs_new->max;
++		slapi_valueset_free (vs_new);
++	}
++	else
++	{
++	        /* caller expects us to own valstoreplace - since we cannot
++	           use them, just delete them */
++        	slapi_valueset_free(vs_new);
++        	valuearray_free(&valstoreplace);
++	}
+     }
+     return rc;
+ }
+@@ -1422,46 +1352,33 @@ valueset_update_csn_for_valuearray(Slapi_ValueSet *vs, const Slapi_Attr *a, Slap
+ 	if(!valuearray_isempty(valuestoupdate) &&
+ 		!valuearray_isempty(vs->va))
+ 	{
+-		/*
+-		 * determine whether we should use an AVL tree of values or not
+-		 */
+ 		struct valuearrayfast vaf_valuesupdated;
+-		int numberofvaluestoupdate= valuearray_count(valuestoupdate);
+ 		valuearrayfast_init(&vaf_valuesupdated,*valuesupdated);
+-		if (numberofvaluestoupdate > 1) /* multiple values to update */
++		int i;
++		int del_index = -1, del_count = 0;
++		for (i=0;valuestoupdate[i]!=NULL;++i)
+ 		{
+-			int i;
+-			Avlnode	*vtree = NULL;
+-			int rc= valuetree_add_valuearray( a, vs->va, &vtree, NULL );
+-			PR_ASSERT(rc==LDAP_SUCCESS);
+-			for (i=0;valuestoupdate[i]!=NULL;++i)
++			int index= valuearray_find(a, vs->va, valuestoupdate[i]);
++			if(index!=-1)
+ 			{
+-				int index= 0;
+-				rc = valuetree_find( a, valuestoupdate[i], vtree, &index );
+-				if(rc==LDAP_SUCCESS)
+-				{
+-					value_update_csn(vs->va[index],t,csn);
+-					valuearrayfast_add_value_passin(&vaf_valuesupdated,valuestoupdate[i]);
+-					valuestoupdate[i] = NULL;
+-				}
++				value_update_csn(vs->va[index],t,csn);
++				valuearrayfast_add_value_passin(&vaf_valuesupdated,valuestoupdate[i]);
++				valuestoupdate[i]= NULL;
++				del_count++;
++				if (del_index < 0) del_index = i;
+ 			}
+-			valuetree_free(&vtree);
+-		}
+-		else
+-		{
+-			int i;
+-			for (i=0;valuestoupdate[i]!=NULL;++i)
+-			{
+-				int index= valuearray_find(a, vs->va, valuestoupdate[i]);
+-				if(index!=-1)
+-				{
+-					value_update_csn(vs->va[index],t,csn);
+-					valuearrayfast_add_value_passin(&vaf_valuesupdated,valuestoupdate[i]);
+-					valuestoupdate[i]= NULL;
++			else 
++			{ /* keep the value in valuestoupdate, to keep array compressed, move to first free slot*/
++				if (del_index >= 0) {
++					valuestoupdate[del_index] = valuestoupdate[i];
++					del_index++;
+ 				}
+ 			}
+ 		}
+-		valuearray_compress(valuestoupdate,numberofvaluestoupdate);
++		/* complete compression */
++		for (i=0; i<del_count;i++)
++			valuestoupdate[del_index+i]= NULL;
++			
+ 		*valuesupdated= vaf_valuesupdated.va;
+ 	}
+ }
+-- 
+1.8.1.4
+

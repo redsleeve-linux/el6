@@ -1,0 +1,304 @@
+From 0aa523cd16f97160ab406db8958a78253f7e31bc Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 22 Feb 2013 14:40:46 -0800
+Subject: [PATCH] Bugzilla 912964 - bug in handling of LDAPv3 control data
+
+Bug Description:
+If we receive an incorrect control, with non NULL bv_val but
+bv_len=0, it can trigger a crash.  This bug occurs because
+of a call of openldap ber_init with such incorrect control.
+
+Fix Description:
+Before calling ber_init, check that the control lenght is not 0.
+
+Note: checking in the patch on behalf of "Thierry bordaz"
+<tbordaz@redhat.com>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=913228
+
+Reviewed by: rmeggins@redhat.com, nhosoi@redhat.com
+
+Platforms tested: Fedora 18, RHEL 6.4 (RHDS6.4)
+
+Flag Day: no
+
+Doc impact: possibly document a security bug
+---
+ ldap/servers/plugins/chainingdb/cb_controls.c      |    6 +---
+ ldap/servers/plugins/chainingdb/cb_utils.c         |    2 +-
+ ldap/servers/plugins/deref/deref.c                 |    2 +-
+ ldap/servers/plugins/dna/dna.c                     |    7 +++--
+ ldap/servers/plugins/replication/repl5_total.c     |    6 ++--
+ ldap/servers/plugins/replication/repl_controls.c   |    2 +-
+ ldap/servers/plugins/replication/repl_extop.c      |   21 ++++++++++++-------
+ ldap/servers/plugins/replication/windows_private.c |    7 ++++++
+ ldap/servers/slapd/back-ldbm/sort.c                |    9 +++----
+ ldap/servers/slapd/back-ldbm/vlv.c                 |    4 +-
+ ldap/servers/slapd/passwd_extop.c                  |    2 +-
+ ldap/servers/slapd/proxyauth.c                     |    2 +-
+ ldap/servers/slapd/slapi-plugin.h                  |    4 +++
+ 13 files changed, 44 insertions(+), 30 deletions(-)
+
+diff --git a/ldap/servers/plugins/chainingdb/cb_controls.c b/ldap/servers/plugins/chainingdb/cb_controls.c
+index f079901..2a698a0 100644
+--- a/ldap/servers/plugins/chainingdb/cb_controls.c
++++ b/ldap/servers/plugins/chainingdb/cb_controls.c
+@@ -220,10 +220,8 @@ int cb_update_controls( Slapi_PBlock * pb,
+             ctrls[dCount]=slapi_dup_control(reqControls[cCount]);
+             dCount++;
+ 
+-        } else
+-            if (!strcmp(reqControls[cCount]->ldctl_oid,CB_LDAP_CONTROL_CHAIN_SERVER) &&
+-                reqControls[cCount]->ldctl_value.bv_val) {
+-
++        } else if (!strcmp(reqControls[cCount]->ldctl_oid,CB_LDAP_CONTROL_CHAIN_SERVER) &&
++                   BV_HAS_DATA((&(reqControls[cCount]->ldctl_value)))) {
+             /* Max hop count reached ?                 */
+             /* Checked earlier by a call to cb_forward_operation()  */
+ 
+diff --git a/ldap/servers/plugins/chainingdb/cb_utils.c b/ldap/servers/plugins/chainingdb/cb_utils.c
+index 2492226..f28f5d3 100644
+--- a/ldap/servers/plugins/chainingdb/cb_utils.c
++++ b/ldap/servers/plugins/chainingdb/cb_utils.c
+@@ -148,7 +148,7 @@ int cb_forward_operation(Slapi_PBlock * pb ) {
+ 		int iscritical=0;
+ 
+ 		if (slapi_control_present(ctrls,CB_LDAP_CONTROL_CHAIN_SERVER,&ctl_value,&iscritical) &&
+-			ctl_value && ctl_value->bv_val) {
++			BV_HAS_DATA(ctl_value)) {
+ 
+ 			/* Decode control data 			*/
+ 			/* hop           INTEGER (0 .. maxInt) 	*/
+diff --git a/ldap/servers/plugins/deref/deref.c b/ldap/servers/plugins/deref/deref.c
+index 7c502df..51394c8 100644
+--- a/ldap/servers/plugins/deref/deref.c
++++ b/ldap/servers/plugins/deref/deref.c
+@@ -382,7 +382,7 @@ deref_parse_ctrl_value(DerefSpecList *speclist, const struct berval *ctrlbv, int
+ 
+     PR_ASSERT(ctrlbv && ctrlbv->bv_val && ctrlbv->bv_len && ldapcode && ldaperrtext);
+ 
+-    if (!ctrlbv || !ctrlbv->bv_val) {
++    if (!BV_HAS_DATA(ctrlbv)) {
+         *ldapcode = LDAP_PROTOCOL_ERROR;
+         *ldaperrtext = "Empty deref control value";
+         return;
+diff --git a/ldap/servers/plugins/dna/dna.c b/ldap/servers/plugins/dna/dna.c
+index 6babe23..080e357 100644
+--- a/ldap/servers/plugins/dna/dna.c
++++ b/ldap/servers/plugins/dna/dna.c
+@@ -1668,7 +1668,7 @@ static int dna_request_range(struct configEntry *config_entry,
+     }
+ 
+     /* Parse response */
+-    if (responsedata && responsedata->bv_val) {
++    if (BV_HAS_DATA(responsedata)) {
+         respber = ber_init(responsedata);
+         if (ber_scanf(respber, "{aa}", &lower_str, &upper_str) == LBER_ERROR) {
+             ret = LDAP_PROTOCOL_ERROR;
+@@ -3745,14 +3745,15 @@ static int dna_extend_exop(Slapi_PBlock *pb)
+ 
+     /* Fetch the request data */
+     slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_VALUE, &reqdata);
+-    if (!reqdata || !reqdata->bv_val) {
++    if (!BV_HAS_DATA(reqdata)) {
+         slapi_log_error(SLAPI_LOG_FATAL, DNA_PLUGIN_SUBSYSTEM,
+                         "dna_extend_exop: No request data received.\n");
+         goto free_and_return;
+     }
+ 
+     /* decode the exop */
+-    if ((reqdata->bv_val == NULL) || (tmp_bere = ber_init(reqdata)) == NULL) {
++    tmp_bere = ber_init(reqdata);
++    if (tmp_bere == NULL) {
+         goto free_and_return;
+     }
+ 
+diff --git a/ldap/servers/plugins/replication/repl5_total.c b/ldap/servers/plugins/replication/repl5_total.c
+index 99ba838..f22246d 100644
+--- a/ldap/servers/plugins/replication/repl5_total.c
++++ b/ldap/servers/plugins/replication/repl5_total.c
+@@ -726,10 +726,10 @@ decode_total_update_extop(Slapi_PBlock *pb, Slapi_Entry **ep)
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_OID, &extop_oid);
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_VALUE, &extop_value);
+ 
+-	if (NULL == extop_oid ||
++	if ((NULL == extop_oid) || 
+ 		((strcmp(extop_oid, REPL_NSDS50_REPLICATION_ENTRY_REQUEST_OID) != 0) && 
+-		(strcmp(extop_oid, REPL_NSDS71_REPLICATION_ENTRY_REQUEST_OID) != 0)) ||
+-		NULL == extop_value || NULL == extop_value->bv_val)
++		 (strcmp(extop_oid, REPL_NSDS71_REPLICATION_ENTRY_REQUEST_OID) != 0)) ||
++		!BV_HAS_DATA(extop_value))
+ 	{
+ 		/* Bogus */
+ 		goto loser;
+diff --git a/ldap/servers/plugins/replication/repl_controls.c b/ldap/servers/plugins/replication/repl_controls.c
+index 980bdd8..e6aeaaa 100644
+--- a/ldap/servers/plugins/replication/repl_controls.c
++++ b/ldap/servers/plugins/replication/repl_controls.c
+@@ -216,7 +216,7 @@ decode_NSDS50ReplUpdateInfoControl(LDAPControl **controlsp,
+ 	if (slapi_control_present(controlsp, REPL_NSDS50_UPDATE_INFO_CONTROL_OID,
+ 	    &ctl_value, &iscritical))
+ 	{
+-		if ((ctl_value->bv_val == NULL) || (tmp_bere = ber_init(ctl_value)) == NULL)
++		if (!BV_HAS_DATA(ctl_value) || (tmp_bere = ber_init(ctl_value)) == NULL)
+ 		{
+ 			rc = -1;
+ 			goto loser;
+diff --git a/ldap/servers/plugins/replication/repl_extop.c b/ldap/servers/plugins/replication/repl_extop.c
+index e842c62..68aed62 100644
+--- a/ldap/servers/plugins/replication/repl_extop.c
++++ b/ldap/servers/plugins/replication/repl_extop.c
+@@ -343,10 +343,10 @@ decode_startrepl_extop(Slapi_PBlock *pb, char **protocol_oid, char **repl_root,
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_OID, &extop_oid);
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_VALUE, &extop_value);
+ 
+-	if (NULL == extop_oid ||
++	if ((NULL == extop_oid) ||
+ 		((strcmp(extop_oid, REPL_START_NSDS50_REPLICATION_REQUEST_OID) != 0) &&
+-		(strcmp(extop_oid, REPL_START_NSDS90_REPLICATION_REQUEST_OID) != 0)) ||
+-		NULL == extop_value || NULL == extop_value->bv_val)
++		 (strcmp(extop_oid, REPL_START_NSDS90_REPLICATION_REQUEST_OID) != 0)) ||
++		!BV_HAS_DATA(extop_value))
+ 	{
+ 		/* bogus */
+ 		rc = -1;
+@@ -480,9 +480,9 @@ decode_endrepl_extop(Slapi_PBlock *pb, char **repl_root)
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_OID, &extop_oid);
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_VALUE, &extop_value);
+ 
+-	if (NULL == extop_oid ||
+-		strcmp(extop_oid, REPL_END_NSDS50_REPLICATION_REQUEST_OID) != 0 ||
+-		NULL == extop_value || NULL == extop_value->bv_val)
++	if ((NULL == extop_oid) || 
++	    (strcmp(extop_oid, REPL_END_NSDS50_REPLICATION_REQUEST_OID) != 0) ||
++	    !BV_HAS_DATA(extop_value))
+ 	{
+ 		/* bogus */
+ 		rc = -1;
+@@ -545,8 +545,8 @@ decode_repl_ext_response(struct berval *bvdata, int *response_code,
+ 	PR_ASSERT(NULL != response_code);
+ 	PR_ASSERT(NULL != ruv_bervals);
+ 
+-	if (NULL == bvdata || NULL == response_code || NULL == ruv_bervals ||
+-		NULL == data_guid || NULL == data || NULL == bvdata->bv_val)
++	if ((NULL == response_code) || (NULL == ruv_bervals) ||
++	    (NULL == data_guid) || (NULL == data) || !BV_HAS_DATA(bvdata))
+ 	{
+ 		return_value = -1;
+ 	}
+@@ -1412,6 +1412,11 @@ decode_cleanruv_payload(struct berval *extop_value, char **payload)
+ {
+ 	BerElement *tmp_bere = NULL;
+ 	int rc = 0;
++        
++	if (!BV_HAS_DATA(extop_value)) {
++		rc = -1;
++		goto free_and_return;                    
++	}
+ 
+ 	if ((tmp_bere = ber_init(extop_value)) == NULL){
+ 		rc = -1;
+diff --git a/ldap/servers/plugins/replication/windows_private.c b/ldap/servers/plugins/replication/windows_private.c
+index 355abd5..20360a3 100644
+--- a/ldap/servers/plugins/replication/windows_private.c
++++ b/ldap/servers/plugins/replication/windows_private.c
+@@ -782,6 +782,13 @@ void windows_private_update_dirsync_control(const Repl_Agmt *ra,LDAPControl **co
+ 			dirsync = slapi_dup_control( controls[i-1]);
+ 		}
+ 
++		if (!dirsync || !BV_HAS_DATA((&(dirsync->ldctl_value)))) {
++#ifdef FOR_DEBUGGING
++			return_value = LDAP_CONTROL_NOT_FOUND;
++#endif
++			goto choke;
++		}
++                
+ 		ber = ber_init( &dirsync->ldctl_value ) ;
+ 
+ 		if (ber_scanf( ber, "{iiO}", &hasMoreData, &maxAttributeCount, &serverCookie) == LBER_ERROR)
+diff --git a/ldap/servers/slapd/back-ldbm/sort.c b/ldap/servers/slapd/back-ldbm/sort.c
+index 501765c..6984467 100644
+--- a/ldap/servers/slapd/back-ldbm/sort.c
++++ b/ldap/servers/slapd/back-ldbm/sort.c
+@@ -299,15 +299,14 @@ int parse_sort_spec(struct berval *sort_spec_ber, sort_spec **ps)
+ 	char *matchrule = NULL;
+ 	int rc = LDAP_SUCCESS;
+ 
+-	if (NULL == sort_spec_ber->bv_val) {
++	if (!BV_HAS_DATA(sort_spec_ber)) {
+ 		return LDAP_PROTOCOL_ERROR;
+ 	}
+ 
+ 	ber = ber_init(sort_spec_ber);
+-    if(ber==NULL)
+-    {
+-        return -1;
+-    }
++	if (ber == NULL) {
++		return -1;
++	}
+ 
+ 	/* Work our way along the BER, one sort spec at a time */
+ 	for ( tag = ber_first_element( ber, &len, &last ); !term_tag(tag); tag = ber_next_element( ber, &len, last )) {
+diff --git a/ldap/servers/slapd/back-ldbm/vlv.c b/ldap/servers/slapd/back-ldbm/vlv.c
+index 39d16bf..2c09531 100644
+--- a/ldap/servers/slapd/back-ldbm/vlv.c
++++ b/ldap/servers/slapd/back-ldbm/vlv.c
+@@ -1861,11 +1861,11 @@ vlv_parse_request_control( backend *be, struct berval *vlv_spec_ber,struct vlv_r
+    	*/
+     BerElement *ber = NULL;
+     int return_value = LDAP_SUCCESS;
+-	
++
+     vlvp->value.bv_len = 0;
+     vlvp->value.bv_val = NULL;
+ 
+-    if (NULL == vlv_spec_ber->bv_val)
++    if (!BV_HAS_DATA(vlv_spec_ber))
+     {
+         return_value= LDAP_OPERATIONS_ERROR;
+         return return_value;
+diff --git a/ldap/servers/slapd/passwd_extop.c b/ldap/servers/slapd/passwd_extop.c
+index 3c050d6..4aebee3 100644
+--- a/ldap/servers/slapd/passwd_extop.c
++++ b/ldap/servers/slapd/passwd_extop.c
+@@ -534,7 +534,7 @@ passwd_modify_extop( Slapi_PBlock *pb )
+ 	/* Get the ber value of the extended operation */
+ 	slapi_pblock_get(pb, SLAPI_EXT_OP_REQ_VALUE, &extop_value);
+ 
+-	if (extop_value->bv_val == NULL)
++	if (!BV_HAS_DATA(extop_value))
+ 	{
+ 		/* The request field wasn't provided.  We'll
+ 		 * now try to determine the userid and verify
+diff --git a/ldap/servers/slapd/proxyauth.c b/ldap/servers/slapd/proxyauth.c
+index fe36cf1..562ac93 100644
+--- a/ldap/servers/slapd/proxyauth.c
++++ b/ldap/servers/slapd/proxyauth.c
+@@ -96,7 +96,7 @@ parse_LDAPProxyAuth(struct berval *spec_ber, int version, char **errtextp,
+ 		break;
+ 	}
+ 
+-	if ( !spec_ber || !spec_ber->bv_val ) {
++	if (!BV_HAS_DATA(spec_ber)) {
+ 		break;
+ 	}
+ 
+diff --git a/ldap/servers/slapd/slapi-plugin.h b/ldap/servers/slapd/slapi-plugin.h
+index 4962b2a..f78787e 100644
+--- a/ldap/servers/slapd/slapi-plugin.h
++++ b/ldap/servers/slapd/slapi-plugin.h
+@@ -107,6 +107,10 @@ NSPR_API(PRUint32) PR_fprintf(struct PRFileDesc* fd, const char *fmt, ...)
+ #define BERLEN_T "u"
+ #endif
+ 
++/* Common check on berval before accessing the contents. */
++/* bv is a struct berval *bv */
++#define BV_HAS_DATA(bv) ((bv != NULL) && (bv->bv_len > 0) && (bv->bv_val != NULL))
++
+ /*
+  * The slapi_attr_get_flags() routine returns a bitmap that contains one or
+  * more of these values.
+-- 
+1.7.7.6
+

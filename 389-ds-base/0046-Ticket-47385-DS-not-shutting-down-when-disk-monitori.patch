@@ -1,0 +1,238 @@
+From 5b5f57e8f008a342d82c7aa2d6a6574df7a3f14e Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Thu, 6 Jun 2013 15:30:41 -0400
+Subject: [PATCH] Ticket 47385 - DS not shutting down when disk monitoring threshold is reached
+
+Bug Description:  If verbose logging is enabled, it fails to correctly
+                  identify that the logging was disabled, and it gets
+                  stuck in an endless loop - never shutting the server down.
+
+                  Also, whe the server does shutdown due to a disk full, the
+                  pid file is not removed.
+
+Fix Description:  Check for the two possible error log levels that indicate
+                  verbose logging is disabled.  There were also logic errors
+                  when determining if it was ok to disable access/audit logging,
+                  and if to delete rotated logs.
+
+                  Also removed the "nsslapd-disk-monitoring-preserve-logging"
+                  setting, as it really didn't served a purpose because it was
+                  basically the same as "nsslapd-disk-monitoring-logging-critical".
+
+                  Lastly, if the server is being shutdown from a "disk full"
+                  condition, then we need to manually remove the pidfile.
+
+https://fedorahosted.org/389/ticket/47385
+
+Reviewed by: Noriko(Thanks!)
+---
+ ldap/servers/slapd/daemon.c     |   31 ++++++++++++++++++++-----------
+ ldap/servers/slapd/libglobs.c   |   28 ----------------------------
+ ldap/servers/slapd/proto-slap.h |    2 --
+ ldap/servers/slapd/slap.h       |    2 --
+ 4 files changed, 20 insertions(+), 43 deletions(-)
+
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index b611f5c..5cc643a 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -711,7 +711,6 @@ disk_monitoring_thread(void *nothing)
+     time_t now = 0;
+     int deleted_rotated_logs = 0;
+     int logging_critical = 0;
+-    int preserve_logging = 0;
+     int passed_threshold = 0;
+     int verbose_logging = 0;
+     int using_accesslog = 0;
+@@ -741,7 +740,6 @@ disk_monitoring_thread(void *nothing)
+          *  Get the config settings, as they could have changed
+          */
+         logging_critical = config_get_disk_logging_critical();
+-        preserve_logging = config_get_disk_preserve_logging();
+         grace_period = 60 * config_get_disk_grace_period(); /* convert it to seconds */
+         verbose_logging = config_get_errorlog_level();
+         threshold = config_get_disk_threshold();
+@@ -798,18 +796,21 @@ disk_monitoring_thread(void *nothing)
+         }
+         /*
+          *  If we are low, see if we are using verbose error logging, and turn it off
++         *  if logging is not critical
+          */
+-        if(verbose_logging){
++        if(verbose_logging != 0 && verbose_logging != LDAP_DEBUG_ANY){
+             LDAPDebug(LDAP_DEBUG_ANY, "Disk space is low on disk (%s), remaining space: %d Kb, "
+-                "setting error loglevel to zero.\n", dirstr, (disk_space / 1024), 0);
+-            config_set_errorlog_level(CONFIG_LOGLEVEL_ATTRIBUTE, 0, errorbuf, CONFIG_APPLY);
++                "temporarily setting error loglevel to zero.\n", dirstr,
++                (disk_space / 1024), 0);
++            /* Setting the log level back to zero, actually sets the value to LDAP_DEBUG_ANY */
++            config_set_errorlog_level(CONFIG_LOGLEVEL_ATTRIBUTE, "0", errorbuf, CONFIG_APPLY);
+             continue;
+         }
+         /*
+          *  If we are low, there's no verbose logging, logs are not critical, then disable the
+          *  access/audit logs, log another error, and continue.
+          */
+-        if(!logs_disabled && (!preserve_logging || !logging_critical)){
++        if(!logs_disabled && !logging_critical){
+             if(disk_space < previous_mark){
+                 LDAPDebug(LDAP_DEBUG_ANY, "Disk space is too low on disk (%s), remaining space: %d Kb, "
+                     "disabling access and audit logging.\n", dirstr, (disk_space / 1024), 0);
+@@ -823,7 +824,7 @@ disk_monitoring_thread(void *nothing)
+          *  If we are low, we turned off verbose logging, logs are not critical, and we disabled
+          *  access/audit logging, then delete the rotated logs, log another error, and continue.
+          */
+-        if(!deleted_rotated_logs && (!preserve_logging || !logging_critical)){
++        if(!deleted_rotated_logs && !logging_critical){
+             if(disk_space < previous_mark){
+                 LDAPDebug(LDAP_DEBUG_ANY, "Disk space is too low on disk (%s), remaining space: %d Kb, "
+                     "deleting rotated logs.\n", dirstr, (disk_space / 1024), 0);
+@@ -872,10 +873,10 @@ disk_monitoring_thread(void *nothing)
+                      */
+                     LDAPDebug(LDAP_DEBUG_ANY, "Available disk space is now acceptable (%d bytes).  Aborting"
+                                               " shutdown, and restoring the log settings.\n",disk_space,0,0);
+-                    if(!preserve_logging && using_accesslog){
++                    if(logs_disabled && using_accesslog){
+                         config_set_accesslog_enabled(LOGGING_ON);
+                     }
+-                    if(!preserve_logging && using_auditlog){
++                    if(logs_disabled && using_auditlog){
+                         config_set_auditlog_enabled(LOGGING_ON);
+                     }
+                     deleted_rotated_logs = 0;
+@@ -892,7 +893,7 @@ disk_monitoring_thread(void *nothing)
+                      */
+                     LDAPDebug(LDAP_DEBUG_ANY, "Disk space is critically low on disk (%s), remaining space: %d Kb."
+                         "  Signaling slapd for shutdown...\n", dirstr, (disk_space / 1024), 0);
+-                    g_set_shutdown( SLAPI_SHUTDOWN_EXIT );
++                    g_set_shutdown( SLAPI_SHUTDOWN_DISKFULL );
+                     return;
+                 }
+                 time(&now);
+@@ -909,7 +910,8 @@ disk_monitoring_thread(void *nothing)
+              */
+             LDAPDebug(LDAP_DEBUG_ANY, "Disk space is still too low (%d Kb).  Signaling slapd for shutdown...\n",
+                 (disk_space / 1024), 0, 0);
+-            g_set_shutdown( SLAPI_SHUTDOWN_EXIT );
++            g_set_shutdown( SLAPI_SHUTDOWN_DISKFULL );
++
+             return;
+         }
+     }
+@@ -1379,6 +1381,13 @@ void slapd_daemon( daemon_ports_t *ports )
+ 
+ #ifdef _WIN32
+ 	WSACleanup();
++#else
++	if ( g_get_shutdown() == SLAPI_SHUTDOWN_DISKFULL ){
++		/* This is a server-induced shutdown, we need to manually remove the pid file */
++		if( unlink(get_pid_file()) ){
++			LDAPDebug( LDAP_DEBUG_ANY, "Failed to remove pid file %s\n", get_pid_file(), 0, 0 );
++		}
++	}
+ #endif
+ }
+ 
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index 3226ede..02e9df1 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -687,10 +687,6 @@ static struct config_get_and_set {
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.disk_logging_critical,
+ 		CONFIG_ON_OFF, (ConfigGetFunc)config_get_disk_logging_critical},
+-	{CONFIG_DISK_PRESERVE_LOGGING, config_set_disk_preserve_logging,
+-		NULL, 0,
+-		(void**)&global_slapdFrontendConfig.disk_preserve_logging,
+-		CONFIG_ON_OFF, (ConfigGetFunc)config_get_disk_preserve_logging},
+ #ifdef MEMPOOL_EXPERIMENTAL
+ 	,{CONFIG_MEMPOOL_SWITCH_ATTRIBUTE, config_set_mempool_switch,
+ 		NULL, 0,
+@@ -1090,7 +1086,6 @@ FrontendConfig_init () {
+   cfg->disk_monitoring = LDAP_OFF;
+   cfg->disk_threshold = 2097152;  /* 2 mb */
+   cfg->disk_grace_period = 60; /* 1 hour */
+-  cfg->disk_preserve_logging = LDAP_OFF;
+   cfg->disk_logging_critical = LDAP_OFF;
+ 
+ #ifdef MEMPOOL_EXPERIMENTAL
+@@ -1259,17 +1254,6 @@ config_set_disk_threshold( const char *attrname, char *value, char *errorbuf, in
+ }
+ 
+ int
+-config_set_disk_preserve_logging( const char *attrname, char *value, char *errorbuf, int apply )
+-{
+-    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+-    int retVal = LDAP_SUCCESS;
+-
+-    retVal = config_set_onoff ( attrname, value, &(slapdFrontendConfig->disk_preserve_logging),
+-                                errorbuf, apply);
+-    return retVal;
+-}
+-
+-int
+ config_set_disk_logging_critical( const char *attrname, char *value, char *errorbuf, int apply )
+ {
+     slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+@@ -3742,18 +3726,6 @@ config_get_disk_monitoring(){
+ }
+ 
+ int
+-config_get_disk_preserve_logging(){
+-    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+-    int retVal;
+-
+-    CFG_LOCK_READ(slapdFrontendConfig);
+-    retVal = slapdFrontendConfig->disk_preserve_logging;
+-    CFG_UNLOCK_READ(slapdFrontendConfig);
+-
+-    return retVal;
+-}
+-
+-int
+ config_get_disk_logging_critical(){
+     slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+     int retVal;
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 5112471..17b1e99 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -388,7 +388,6 @@ int config_set_default_naming_context( const char *attrname, char *value, char *
+ int config_set_disk_monitoring( const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_disk_threshold( const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_disk_grace_period( const char *attrname, char *value, char *errorbuf, int apply );
+-int config_set_disk_preserve_logging( const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_disk_logging_critical( const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_auditlog_unhashed_pw(const char *attrname, char *value, char *errorbuf, int apply);
+ 
+@@ -544,7 +543,6 @@ int config_get_accesslog_logging_enabled();
+ int config_get_disk_monitoring();
+ long config_get_disk_threshold();
+ int config_get_disk_grace_period();
+-int config_get_disk_preserve_logging();
+ int config_get_disk_logging_critical();
+ 
+ int is_abspath(const char *);
+diff --git a/ldap/servers/slapd/slap.h b/ldap/servers/slapd/slap.h
+index eea025a..e0b261d 100644
+--- a/ldap/servers/slapd/slap.h
++++ b/ldap/servers/slapd/slap.h
+@@ -2001,7 +2001,6 @@ typedef struct _slapdEntryPoints {
+ #define CONFIG_DISK_MONITORING "nsslapd-disk-monitoring"
+ #define CONFIG_DISK_THRESHOLD "nsslapd-disk-monitoring-threshold"
+ #define CONFIG_DISK_GRACE_PERIOD "nsslapd-disk-monitoring-grace-period"
+-#define CONFIG_DISK_PRESERVE_LOGGING "nsslapd-disk-monitoring-preserve-logging"
+ #define CONFIG_DISK_LOGGING_CRITICAL "nsslapd-disk-monitoring-logging-critical"
+ 
+ #ifdef MEMPOOL_EXPERIMENTAL
+@@ -2236,7 +2235,6 @@ typedef struct _slapdFrontendConfig {
+   int disk_monitoring;
+   int disk_threshold;
+   int disk_grace_period;
+-  int disk_preserve_logging;
+   int disk_logging_critical;
+ } slapdFrontendConfig_t;
+ 
+-- 
+1.7.1
+

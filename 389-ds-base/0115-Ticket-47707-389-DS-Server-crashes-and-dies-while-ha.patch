@@ -1,0 +1,84 @@
+From 9795451b028a048021af153ac39094578e4f1e50 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 29 Apr 2014 17:34:47 -0700
+Subject: [PATCH 115/115] Ticket #47707 - 389 DS Server crashes and dies while
+ handles paged searches from clients
+
+Bug Description: If a simple paged search request was sent to the server
+and the request was abandoned, the paged result slot in the connection
+table was not properly released by setting NULL to pr_current_be.  Since
+the slot did not look available for the next request even though it was,
+the next request failed to get the valid slot number, and the initial slot
+number -1 failed to be replaced with the real slot number.  Until the fix
+for "Ticket #47623 fix memleak caused by 47347" was made, it overrode the
+allocated array's [-1] location, which usually stores the meta data of the
+allocated memory.  That crashed the server in the next realloc since the
+corrupted memory was passed to the function.
+
+Fix Description: This patch cleans up the abandoned/cleaned up slot for
+reuse.  Also, more check not to break the meta data is added.
+
+Special thanks to German Parente (gparente@redhat.com) for providing the
+reproducer and analysing the crash.
+
+https://fedorahosted.org/389/ticket/47707
+
+Reviewed by rmeggins@redhat.com (Thanks, Rich!)
+
+(cherry picked from commit 087356f7eaff2dff3c0c4f7dfcaa6aacc9979224)
+(cherry picked from commit 2132875746ed9e1fc7c9c53450241c91d0c5ae55)
+(cherry picked from commit 40e86e74fb4ecc0fc5a1027d8241945d9b2564e0)
+(cherry picked from commit b2ee65dd6c4af4f2cab515406a6f7fd9f1dc4dcc)
+---
+ ldap/servers/slapd/pagedresults.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/pagedresults.c b/ldap/servers/slapd/pagedresults.c
+index 9af5773..edd76c6 100644
+--- a/ldap/servers/slapd/pagedresults.c
++++ b/ldap/servers/slapd/pagedresults.c
+@@ -130,7 +130,8 @@ pagedresults_parse_control_value( Slapi_PBlock *pb,
+                 }
+             }
+         }
+-        if (!conn->c_pagedresults.prl_list[*index].pr_mutex) {
++        if ((*index > -1) && (*index < conn->c_pagedresults.prl_maxlen) &&
++            !conn->c_pagedresults.prl_list[*index].pr_mutex) {
+             conn->c_pagedresults.prl_list[*index].pr_mutex = PR_NewLock();
+         }
+         conn->c_pagedresults.prl_count++;
+@@ -270,6 +271,7 @@ pagedresults_free_one( Connection *conn, Operation *op, int index )
+                 prp->pr_current_be->be_search_results_release &&
+                 prp->pr_search_result_set) {
+                 prp->pr_current_be->be_search_results_release(&(prp->pr_search_result_set));
++                prp->pr_current_be = NULL;
+             }
+             if (prp->pr_mutex) {
+                 /* pr_mutex is reused; back it up and reset it. */
+@@ -307,6 +309,7 @@ pagedresults_free_one_msgid_nolock( Connection *conn, ber_int_t msgid )
+                         prp->pr_current_be->be_search_results_release &&
+                         prp->pr_search_result_set) {
+                         prp->pr_current_be->be_search_results_release(&(prp->pr_search_result_set));
++                        prp->pr_current_be = NULL;
+                     }
+                     prp->pr_flags |= CONN_FLAG_PAGEDRESULTS_ABANDONED;
+                     prp->pr_flags &= ~CONN_FLAG_PAGEDRESULTS_PROCESSING;
+@@ -724,6 +727,7 @@ pagedresults_cleanup(Connection *conn, int needlock)
+         if (prp->pr_current_be && prp->pr_search_result_set &&
+             prp->pr_current_be->be_search_results_release) {
+             prp->pr_current_be->be_search_results_release(&(prp->pr_search_result_set));
++            prp->pr_current_be = NULL;
+             rc = 1;
+         }
+         if (prp->pr_mutex) {
+@@ -771,6 +775,7 @@ pagedresults_cleanup_all(Connection *conn, int needlock)
+         if (prp->pr_current_be && prp->pr_search_result_set &&
+             prp->pr_current_be->be_search_results_release) {
+             prp->pr_current_be->be_search_results_release(&(prp->pr_search_result_set));
++            prp->pr_current_be = NULL;
+             rc = 1;
+         }
+     }
+-- 
+1.8.1.4
+

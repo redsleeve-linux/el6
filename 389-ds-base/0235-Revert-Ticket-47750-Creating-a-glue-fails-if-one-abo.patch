@@ -1,0 +1,31 @@
+From 0285eda3431d3b74a7484eb23a8bc12be1fadf90 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 1 Jul 2014 23:14:31 -0700
+Subject: [PATCH] Revert "Ticket #47750 - Creating a glue fails if one above
+ level is a conflict or missing"
+
+This reverts commit e18869e1e0a69005912b9609dab9ed9a0e106844.
+
+This patch should not be in 389-ds-base-1.2.11 branch.
+---
+ ldap/servers/slapd/back-ldbm/ldbm_delete.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_delete.c b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+index ece8f0f..23529dc 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_delete.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+@@ -1332,9 +1332,7 @@ common_return:
+ 	if (!delete_tombstone_entry) {
+ 		plugin_call_plugins (pb, SLAPI_PLUGIN_BE_POST_DELETE_FN);
+ 	}
+-	if (inst && inst->inst_ref_count) { 
+-		slapi_counter_decrement(inst->inst_ref_count); 
+-	}
++
+ 	if (ruv_c_init) {
+ 		modify_term(&ruv_c, be);
+ 	}
+-- 
+1.8.1.4
+

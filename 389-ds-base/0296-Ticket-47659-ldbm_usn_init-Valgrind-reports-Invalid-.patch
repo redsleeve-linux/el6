@@ -1,0 +1,56 @@
+From 810d8677e03d9ce8b3428348ece04399e085b6a3 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Mon, 27 Jan 2014 15:15:01 -0800
+Subject: [PATCH 296/305] Ticket #47659 - ldbm_usn_init: Valgrind reports
+ Invalid read / SIGSEGV
+
+Bug description: A suffix mapping tree could exist without the corresponding
+backend.  The existing code did not properly check the backend returned from
+slapi_mapping_tree_find_backend_for_sdn.  When NULL backend is returned, it
+triggers the NULL pointer dereference.
+
+Fix description: This patch added a NULL backend check to usn_get_last_usn,
+and moved a logging to the if clause where the backend is not NULL.
+
+https://fedorahosted.org/389/ticket/47659
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+
+(cherry picked from commit a6f66e7fcbd5d17d975cc2ac65806d7c64571254)
+(cherry picked from commit 6ad2397fa5d1319840d66f9ec47dfdd7bde8f129)
+(cherry picked from commit 412ec0e9c8367f2d1c446237cb2bc27791ea8e6c)
+(cherry picked from commit 4b7184c823da5117ddb1deb04bf1ef47eb9019e2)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_usn.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_usn.c b/ldap/servers/slapd/back-ldbm/ldbm_usn.c
+index 7c11a68..1ca16b1 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_usn.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_usn.c
+@@ -80,10 +80,11 @@ ldbm_usn_init(struct ldbminfo  *li)
+     for ( sdn = slapi_get_first_suffix( &node, 0 ); sdn != NULL;
+           sdn = slapi_get_next_suffix_ext( &node, 0 )) {
+         be = slapi_mapping_tree_find_backend_for_sdn(sdn);
+-        slapi_log_error(SLAPI_LOG_BACKLDBM, "ldbm_usn_init",
+-                    "backend: %s%s\n", be->be_name, isglobal?" (global mode)":"");
+         rc = usn_get_last_usn(be, &last_usn);
+         if (0 == rc) { /* only when the last usn is available */
++            slapi_log_error(SLAPI_LOG_BACKLDBM, "ldbm_usn_init",
++                            "backend: %s%s\n", be->be_name, 
++                            isglobal?" (global mode)":"");
+             if (isglobal) {
+                 if (isfirst) {
+                     li->li_global_usn_counter = slapi_counter_new();
+@@ -126,7 +127,7 @@ usn_get_last_usn(Slapi_Backend *be, PRUint64 *last_usn)
+     DBT value;
+     PRInt64 signed_last_usn;
+ 
+-    if (NULL == last_usn) {
++    if ((NULL == be) || (NULL == last_usn)) {
+         return rc;
+     }
+ 
+-- 
+1.9.3
+

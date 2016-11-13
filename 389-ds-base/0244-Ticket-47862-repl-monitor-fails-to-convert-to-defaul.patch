@@ -1,0 +1,59 @@
+From 6806084e9ebef75172d981ce107eb19a0e81659e Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Thu, 7 Aug 2014 12:18:57 -0400
+Subject: [PATCH 244/251] Ticket 47862 - repl-monitor fails to convert "*" to
+ default values
+
+Bug Description:  When specifying the "connection" parameters, you are
+                  allowed to use asterisks to signify default values.
+                  This was not properly checked in the script, and the
+                  the default values were not applied.
+
+Fix Description:  Properly check for "*" for the bind dn, bind password,
+                  and certdir.
+
+https://fedorahosted.org/389/ticket/47862
+
+Reviewed by: nhosoi(Thanks!)
+
+(cherry picked from commit a498525a76aaafc7d2979f577d4e7a93a3158d0b)
+
+Conflicts:
+	ldap/admin/src/scripts/repl-monitor.pl.in
+
+(cherry picked from commit 44c4221d5f6ec3c7e8ca5d3452b24870f7cccf62)
+(cherry picked from commit 1970a559bfd4e7484acea1b5dcef4e846d4a7b53)
+---
+ ldap/admin/src/scripts/repl-monitor.pl.in | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/admin/src/scripts/repl-monitor.pl.in b/ldap/admin/src/scripts/repl-monitor.pl.in
+index 9107c2d..4cb0bef 100755
+--- a/ldap/admin/src/scripts/repl-monitor.pl.in
++++ b/ldap/admin/src/scripts/repl-monitor.pl.in
+@@ -1008,7 +1008,10 @@ sub add_server
+ 	$hostnode = $1 if $host =~ /^(.+?)\./;
+ 
+ 	# new host:port
+-	if (!$binddn || $binddn eq "" || !$bindpwd || $bindpwd eq "" || !$bindcert || $bindcert eq "") {
++	if (!$binddn   || $binddn eq ""   || $binddn eq "*"   ||
++	    !$bindpwd  || $bindpwd eq ""  || $bindpwd eq "*"  ||
++	    !$bindcert || $bindcert eq "" || $bindcert eq "*" )
++	{
+ 		#
+ 		# Look up connection parameter in the order of
+ 		#	host:port
+@@ -1043,8 +1046,8 @@ sub add_server
+ 				$binddn = $d;
+ 			}
+ 		}
+-		if($prompt eq "yes" && ($w eq "" || (!$bindpwd || $bindpwd eq ""))){
+-            $bindpwd = passwdPrompt($h, $p);
++		if($prompt eq "yes" && ($w eq "" || (!$bindpwd || $bindpwd eq "" || $bindpwd eq "*"))){
++			$bindpwd = passwdPrompt($h, $p);
+ 		} elsif ($passwd ne ""){
+             $bindpwd = $passwd;
+ 		} else {
+-- 
+1.8.1.4
+

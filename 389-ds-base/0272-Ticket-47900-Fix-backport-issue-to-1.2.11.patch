@@ -1,0 +1,67 @@
+From 07ecc139cf0332469fb27f69fe624db4160bcdf9 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 7 Oct 2014 14:24:17 -0400
+Subject: [PATCH 272/305] Ticket 47900 - Fix backport issue to 1.2.11
+
+Bug Description:  The backport to 1.2.11 was incorrect, and caused valid adds to
+                  to fail, but not return an error.
+
+Fix Description:  Fix login when checking for password admins and password syntax.
+
+https://fedorahosted.org/389/ticket/47900
+
+Reviewed by: nhosoi(Thanks!)
+
+(cherry picked from commit 851240569e1759589e1d40ad3caf3da5726e263b)
+---
+ ldap/servers/slapd/add.c | 10 ++++++----
+ ldap/servers/slapd/pw.c  |  5 -----
+ 2 files changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/ldap/servers/slapd/add.c b/ldap/servers/slapd/add.c
+index 9b549c3..5b3b5ee 100644
+--- a/ldap/servers/slapd/add.c
++++ b/ldap/servers/slapd/add.c
+@@ -562,7 +562,12 @@ static void op_shared_add (Slapi_PBlock *pb)
+ 
+ 			/* check password syntax */
+ 			if (!pw_is_pwp_admin(pb, pwpolicy) &&
+-			    check_pw_syntax(pb, slapi_entry_get_sdn_const(e), present_values, NULL, e, 0) == 0)
++			    check_pw_syntax(pb, slapi_entry_get_sdn_const(e), present_values, NULL, e, 0) != 0)
++			{
++				/* error result is sent from check_pw_syntax */
++				goto done;
++			}
++			else
+ 			{
+ 				Slapi_Value **vals= NULL;
+ 				valuearray_add_valuearray(&unhashed_password_vals, present_values, 0);
+@@ -575,9 +580,6 @@ static void op_shared_add (Slapi_PBlock *pb)
+ 				/* Add the unhashed password pseudo-attribute to the entry */
+ 				pwdtype = slapi_attr_syntax_normalize(PSEUDO_ATTR_UNHASHEDUSERPASSWORD);
+ 				slapi_entry_add_values_sv(e, pwdtype, unhashed_password_vals);
+-			} else {
+-				/* error result is sent from check_pw_syntax */
+-				goto done;
+ 			}
+ 		}
+ 
+diff --git a/ldap/servers/slapd/pw.c b/ldap/servers/slapd/pw.c
+index eb9eacb..d32afd8 100644
+--- a/ldap/servers/slapd/pw.c
++++ b/ldap/servers/slapd/pw.c
+@@ -1643,11 +1643,6 @@ new_passwdPolicy(Slapi_PBlock *pb, const char *dn)
+ 	slapdFrontendConfig_t *slapdFrontendConfig;
+ 	int optype = -1;
+ 
+-	/* If we already allocated a pw policy, return it */
+-	if(pb && pb->pwdpolicy){
+-		return pb->pwdpolicy;
+-	}
+-
+ 	if (g_get_active_threadcnt() == 0){
+ 		/*
+ 		 * If the server is starting up the thread count will be zero, so
+-- 
+1.9.3
+

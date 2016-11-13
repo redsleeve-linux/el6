@@ -1,0 +1,184 @@
+From 9992230f8a4e515078048f301c84dc9f4f9947d8 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Tue, 16 Apr 2013 08:26:03 -0600
+Subject: [PATCH 65/99] Ticket #47377 - make listen backlog size configurable
+
+https://fedorahosted.org/389/ticket/47377
+Reviewed by: nkinder (Thanks!)
+Branch: 389-ds-base-1.2.11
+Fix Description: Add the attribute nsslapd-listen-backlog-size - this controls
+the listening socket connection backlog maximum size.  This corresponds to
+the backlog parameter of the listen() system call.  The default value is 128.
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: yes - need to doc the new attribute
+(cherry picked from commit 18ff7203323fef9c7bd01222c6775e82ff979922)
+---
+ ldap/servers/slapd/daemon.c     | 16 ++++------------
+ ldap/servers/slapd/libglobs.c   | 31 +++++++++++++++++++++++++++++++
+ ldap/servers/slapd/proto-slap.h |  2 ++
+ ldap/servers/slapd/slap.h       | 10 ++++++++++
+ 4 files changed, 47 insertions(+), 12 deletions(-)
+
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index 93ebe4a..c67067b 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -99,14 +99,6 @@
+ #include "getsocketpeer.h"
+ #endif /* ENABLE_LDAPI */
+ 
+-/*
+- * Define the backlog number for use in listen() call.
+- * We use the same definition as in ldapserver/include/base/systems.h
+- */
+-#ifndef DAEMON_LISTEN_SIZE
+-#define DAEMON_LISTEN_SIZE 128
+-#endif
+-
+ #if defined (LDAP_IOCP)
+ #define	SLAPD_WAKEUP_TIMER	250
+ #else
+@@ -1079,7 +1071,7 @@ void slapd_daemon( daemon_ports_t *ports )
+ 	/* We are now ready to accept incoming connections */
+ #if defined( XP_WIN32 )
+ 	if ( n_tcps != SLAPD_INVALID_SOCKET
+-				&& listen( n_tcps, DAEMON_LISTEN_SIZE ) == -1 ) {
++				&& listen( n_tcps, config_get_listen_backlog_size() ) == -1 ) {
+ 		int		oserr = errno;
+ 		char	addrbuf[ 256 ];
+ 
+@@ -1095,7 +1087,7 @@ void slapd_daemon( daemon_ports_t *ports )
+ 		PRFileDesc **fdesp;
+ 		PRNetAddr  **nap = ports->n_listenaddr;
+ 		for (fdesp = n_tcps; fdesp && *fdesp; fdesp++, nap++) {
+-			if ( PR_Listen( *fdesp, DAEMON_LISTEN_SIZE ) == PR_FAILURE ) {
++			if ( PR_Listen( *fdesp, config_get_listen_backlog_size() ) == PR_FAILURE ) {
+ 				PRErrorCode prerr = PR_GetError();
+ 				char		addrbuf[ 256 ];
+ 
+@@ -1115,7 +1107,7 @@ void slapd_daemon( daemon_ports_t *ports )
+ 		PRFileDesc **fdesp;
+ 		PRNetAddr  **sap = ports->s_listenaddr;
+ 		for (fdesp = s_tcps; fdesp && *fdesp; fdesp++, sap++) {
+-			if ( PR_Listen( *fdesp, DAEMON_LISTEN_SIZE ) == PR_FAILURE ) {
++			if ( PR_Listen( *fdesp, config_get_listen_backlog_size() ) == PR_FAILURE ) {
+ 				PRErrorCode prerr = PR_GetError();
+ 				char		addrbuf[ 256 ];
+ 
+@@ -1136,7 +1128,7 @@ void slapd_daemon( daemon_ports_t *ports )
+ 		PRFileDesc **fdesp;
+ 		PRNetAddr  **iap = ports->i_listenaddr;
+ 		for (fdesp = i_unix; fdesp && *fdesp; fdesp++, iap++) {
+-			if ( PR_Listen(*fdesp, DAEMON_LISTEN_SIZE) == PR_FAILURE) {
++			if ( PR_Listen(*fdesp, config_get_listen_backlog_size()) == PR_FAILURE) {
+ 				PRErrorCode prerr = PR_GetError();
+ 				slapi_log_error(SLAPI_LOG_FATAL, "slapd_daemon",
+ 					"listen() on %s failed: error %d (%s)\n",
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index 5bfd665..aaee33a 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -693,6 +693,10 @@ static struct config_get_and_set {
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.sasl_max_bufsize,
+ 		CONFIG_INT, (ConfigGetFunc)config_get_sasl_maxbufsize},
++	{CONFIG_LISTEN_BACKLOG_SIZE, config_set_listen_backlog_size,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.listen_backlog_size, CONFIG_INT,
++		(ConfigGetFunc)config_get_listen_backlog_size}
+ #ifdef MEMPOOL_EXPERIMENTAL
+ 	,{CONFIG_MEMPOOL_SWITCH_ATTRIBUTE, config_set_mempool_switch,
+ 		NULL, 0,
+@@ -1095,6 +1099,7 @@ FrontendConfig_init () {
+   cfg->disk_logging_critical = LDAP_OFF;
+   cfg->sasl_max_bufsize = SLAPD_DEFAULT_SASL_MAXBUFSIZE;
+ 
++  cfg->listen_backlog_size = DAEMON_LISTEN_SIZE;
+ #ifdef MEMPOOL_EXPERIMENTAL
+   cfg->mempool_switch = LDAP_ON;
+   cfg->mempool_maxfreelist = 1024;
+@@ -6184,6 +6189,32 @@ config_set_default_naming_context(const char *attrname,
+     return LDAP_SUCCESS;
+ }
+ 
++int
++config_set_listen_backlog_size( const char *attrname, char *value,
++		char *errorbuf, int apply )
++{
++	slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++	
++	if ( config_value_is_null( attrname, value, errorbuf, 0 )) {
++		return LDAP_OPERATIONS_ERROR;
++	}
++
++	if ( apply ) {
++    		slapdFrontendConfig->listen_backlog_size = atoi(value);
++	}
++	return LDAP_SUCCESS;
++}
++
++int
++config_get_listen_backlog_size()
++{
++  slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++  int retVal;
++
++  retVal = slapdFrontendConfig->listen_backlog_size;
++  return retVal; 
++}
++
+ /*
+  * This function is intended to be used from the dse code modify callback.  It
+  * is "optimized" for that case because it takes a berval** of values, which is
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 911dadd..a15c0cc 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -391,6 +391,7 @@ int config_set_disk_grace_period( const char *attrname, char *value, char *error
+ int config_set_disk_logging_critical( const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_auditlog_unhashed_pw(const char *attrname, char *value, char *errorbuf, int apply);
+ int config_set_sasl_maxbufsize(const char *attrname, char *value, char *errorbuf, int apply );
++int config_set_listen_backlog_size(const char *attrname, char *value, char *errorbuf, int apply);
+ 
+ #if !defined(_WIN32) && !defined(AIX)
+ int config_set_maxdescriptors( const char *attrname, char *value, char *errorbuf, int apply );
+@@ -546,6 +547,7 @@ PRUint64 config_get_disk_threshold();
+ int config_get_disk_grace_period();
+ int config_get_disk_logging_critical();
+ int config_get_sasl_maxbufsize();
++int config_get_listen_backlog_size(void);
+ 
+ int is_abspath(const char *);
+ char* rel2abspath( char * );
+diff --git a/ldap/servers/slapd/slap.h b/ldap/servers/slapd/slap.h
+index ef986e2..eaa1fee 100644
+--- a/ldap/servers/slapd/slap.h
++++ b/ldap/servers/slapd/slap.h
+@@ -2005,6 +2005,15 @@ typedef struct _slapdEntryPoints {
+ #define CONFIG_DISK_GRACE_PERIOD "nsslapd-disk-monitoring-grace-period"
+ #define CONFIG_DISK_LOGGING_CRITICAL "nsslapd-disk-monitoring-logging-critical"
+ #define CONFIG_SASL_MAXBUFSIZE "nsslapd-sasl-max-buffer-size"
++#define CONFIG_LISTEN_BACKLOG_SIZE	"nsslapd-listen-backlog-size"
++
++/*
++ * Define the backlog number for use in listen() call.
++ * We use the same definition as in ldapserver/include/base/systems.h
++ */
++#ifndef DAEMON_LISTEN_SIZE
++#define DAEMON_LISTEN_SIZE 128
++#endif
+ 
+ #ifdef MEMPOOL_EXPERIMENTAL
+ #define CONFIG_MEMPOOL_SWITCH_ATTRIBUTE "nsslapd-mempool"
+@@ -2218,6 +2227,7 @@ typedef struct _slapdFrontendConfig {
+   int minssf_exclude_rootdse; /* ON: minssf is ignored when searching rootdse */
+   size_t maxsasliosize;         /* limit incoming SASL IO packet size */
+   char *anon_limits_dn;		/* template entry for anonymous resource limits */
++  int listen_backlog_size;      /* size of backlog parameter to PR_Listen */
+ #ifndef _WIN32
+   struct passwd *localuserinfo; /* userinfo of localuser */
+ #endif /* _WIN32 */
+-- 
+1.8.1.4
+

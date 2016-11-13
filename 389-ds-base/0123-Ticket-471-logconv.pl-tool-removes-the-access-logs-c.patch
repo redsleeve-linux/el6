@@ -1,0 +1,71 @@
+From 272f7c558b16d8764c0cb82a547b94333f1b6294 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 8 Jan 2013 13:47:25 -0500
+Subject: [PATCH 123/225] Ticket 471 - logconv.pl tool removes the access logs
+ contents if "-M" is not correctly used
+
+Bug Description:  If you fail to specifiy the output file, the access log is overwritten.
+
+Fix Description:  Check if the proper files have been provbided to the script, and report error otherwise.
+
+https://fedorahosted.org/389/ticket/471
+
+Reviewed by: nhosoi(Thanks!)
+(cherry picked from commit 89fb3420c9137cb2c9813fec527b89fec3b6d63e)
+(cherry picked from commit 9f0c9392ac7e27193831098f1efd4b7047432cd7)
+(cherry picked from commit 96cdf89f5cb160b5906c36cb3c43013582577595)
+---
+ ldap/admin/src/logconv.pl | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/admin/src/logconv.pl b/ldap/admin/src/logconv.pl
+index f5342af..0ec596a 100755
+--- a/ldap/admin/src/logconv.pl
++++ b/ldap/admin/src/logconv.pl
+@@ -71,6 +71,7 @@ $endFlag = 0;
+ $endTime = 0;
+ $s_stats = new_stats_block( );
+ $m_stats = new_stats_block( );
++$report_opt = "";
+ 
+ GetOptions(
+ 	'd|rootDN=s' => \$manager,
+@@ -81,8 +82,8 @@ GetOptions(
+ 	'S|startTime=s' => \$startTime,
+ 	'E|endTime=s' => \$endTime,
+ 	'B|bind=s' => sub { $reportBinds = "yes"; $bindReportDN=($_[1]) },
+-	'm|reportFileSecs=s' => sub { my ($opt,$value) = @_; $s_stats = new_stats_block($value); },
+-	'M|reportFileMins=s' =>  sub { my ($opt,$value) = @_; $m_stats = new_stats_block($value); },
++	'm|reportFileSecs=s' => sub { my ($opt,$value) = @_; $s_stats = new_stats_block($value); $report_opt = "-m"; },
++	'M|reportFileMins=s' =>  sub { my ($opt,$value) = @_; $m_stats = new_stats_block($value); $report_opt = "-M"; },
+ 	'h|help' => sub { displayUsage() },
+ 	# usage options '-efcibaltnxgjuiryp'
+ 	'e' => sub { $usage = $usage . "e"; },
+@@ -132,6 +133,15 @@ while($sn <= $#ARGV){
+ 	$sn++;
+ }
+ 
++if($fc == 0){
++	if($report_opt ne ""){
++		print "Usage error for option $report_opt, either the output file or access log is missing!\n\n";
++	} else {
++		print "There are no access logs specified!\n\n";
++	}
++	exit 1;
++}
++
+ if ($sizeCount eq "all"){$sizeCount = "100000";}
+ 
+ #######################################
+@@ -261,7 +271,7 @@ $err[68] = "Already Exists\n";
+ $err[69] = "No Objectclass Mods\n";
+ $err[70] = "Results Too Large\n";
+ $err[71] = "Effect Multiple DSA's\n";
+-$err[80] = "Other :-)\n";
++$err[80] = "Other\n";
+ $err[81] = "Server Down\n";
+ $err[82] = "Local Error\n";
+ $err[83] = "Encoding Error\n";
+-- 
+1.8.1.4
+

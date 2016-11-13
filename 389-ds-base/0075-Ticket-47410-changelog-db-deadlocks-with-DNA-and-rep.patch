@@ -1,0 +1,115 @@
+From 3712b35b7a61154be53649341885f49dce2820f4 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Wed, 26 Jun 2013 13:35:39 -0600
+Subject: [PATCH 75/99] Ticket #47410 - changelog db deadlocks with DNA and
+ replication
+
+https://fedorahosted.org/389/ticket/47410
+Reviewed by: mreynolds (Thanks!)
+Branch: 389-ds-base-1.2.11
+Fix Description: The deadlock is caused by having an outer and an inner
+transaction in one thread, and a replication reader in another thread.  The
+outer transaction acquires a write lock on certain changelog db (cldb) pages
+as a result of a previous nested transaction (e.g. a DNA shared config
+area update).  The changelog reader in the cursor positioning operation
+acquires read locks on certain other pages.  When another inner write
+transaction occurs, it may attempt to acquire a write lock on a page held
+by a read lock in the reader thread.  This will eventually fail because
+the reader will not release its lock on the page until the outer transaction
+releases the write lock on the page.
+The solution is to change the way the deadlock detection thread works, to
+use a different deadlock rejection policy.  When using DB_LOCK_MINWRITE
+instead of the default DB_LOCK_YOUNGEST, the reader thread lock request is
+rejected.  This means the code that positions the changelog cursor has to be
+able to handle a DB_LOCK_DEADLOCK return.
+Changing the deadlock rejection policy globally to DB_LOCK_MINWRITE has the
+potential to cause any search to get a DB_LOCK_DEADLOCK from a db or cursor
+get(), so this will need to be tested a great deal to make sure we can handle
+all such cases.
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: no
+(cherry picked from commit b573d80d9c3acc6dba1bd60bdf7bf3fe4f4168df)
+(cherry picked from commit 2e1d6331a294378650bef9af8a5f24bd338ae01e)
+(cherry picked from commit 1987727066e6248cac978139779193d0f56ff9ce)
+(cherry picked from commit 489de18b135c4019d93a3cf89a108b2c3c4cc3d9)
+---
+ ldap/servers/plugins/replication/cl5.h         |  2 ++
+ ldap/servers/plugins/replication/cl5_api.c     |  1 -
+ ldap/servers/plugins/replication/cl5_clcache.c | 20 +++++++++++++++++++-
+ 3 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/plugins/replication/cl5.h b/ldap/servers/plugins/replication/cl5.h
+index 4c92ecd..33f8140 100644
+--- a/ldap/servers/plugins/replication/cl5.h
++++ b/ldap/servers/plugins/replication/cl5.h
+@@ -73,4 +73,6 @@ void changelog5_config_done (changelog5Config *config);
+ /* frees the content and the config structure */
+ void changelog5_config_free (changelog5Config **config);
+ 
++#define MAX_TRIALS			50				/* number of retries on db operations */
++
+ #endif
+diff --git a/ldap/servers/plugins/replication/cl5_api.c b/ldap/servers/plugins/replication/cl5_api.c
+index 175eb80..e24cead 100644
+--- a/ldap/servers/plugins/replication/cl5_api.c
++++ b/ldap/servers/plugins/replication/cl5_api.c
+@@ -67,7 +67,6 @@
+ 
+ #define GUARDIAN_FILE		"guardian"		/* name of the guardian file */
+ #define VERSION_FILE		"DBVERSION"		/* name of the version file  */
+-#define MAX_TRIALS			50				/* number of retries on db operations */
+ #define V_5					5				/* changelog entry version */
+ #define CHUNK_SIZE			64*1024
+ #define DBID_SIZE			64
+diff --git a/ldap/servers/plugins/replication/cl5_clcache.c b/ldap/servers/plugins/replication/cl5_clcache.c
+index 202cb64..5329b4b 100644
+--- a/ldap/servers/plugins/replication/cl5_clcache.c
++++ b/ldap/servers/plugins/replication/cl5_clcache.c
+@@ -380,6 +380,7 @@ clcache_load_buffer_bulk ( CLC_Buffer *buf, int flag )
+ 	DB_TXN *txn = NULL;
+ 	DBC *cursor = NULL;
+ 	int rc = 0;
++	int tries = 0;
+ 
+ #if 0 /* txn control seems not improving anything so turn it off */
+ 	if ( *(_pool->pl_dbenv) ) {
+@@ -401,6 +402,7 @@ clcache_load_buffer_bulk ( CLC_Buffer *buf, int flag )
+ 	}
+ 
+ 	PR_Lock ( buf->buf_busy_list->bl_lock );
++retry:
+ 	if ( 0 == ( rc = clcache_open_cursor ( txn, buf, &cursor )) ) {
+ 
+ 		if ( flag == DB_NEXT ) {
+@@ -422,10 +424,26 @@ clcache_load_buffer_bulk ( CLC_Buffer *buf, int flag )
+ 
+ 	/*
+ 	 * Don't keep a cursor open across the whole replication session.
+-	 * That had caused noticable DB resource contention.
++	 * That had caused noticeable DB resource contention.
+ 	 */
+ 	if ( cursor ) {
+ 		cursor->c_close ( cursor );
++		cursor = NULL;
++	}
++	if ((rc == DB_LOCK_DEADLOCK) && (tries < MAX_TRIALS)) {
++		PRIntervalTime interval;
++
++		tries++;
++		slapi_log_error ( SLAPI_LOG_TRACE, "clcache_load_buffer_bulk",
++		                  "deadlock number [%d] - retrying\n", tries );
++		/* back off */
++		interval = PR_MillisecondsToInterval(slapi_rand() % 100);
++		DS_Sleep(interval);
++		goto retry;
++	}
++	if ((rc == DB_LOCK_DEADLOCK) && (tries >= MAX_TRIALS)) {
++		slapi_log_error ( SLAPI_LOG_REPL, "clcache_load_buffer_bulk",
++		                  "could not load buffer from changelog after %d tries\n", tries );
+ 	}
+ 
+ #if 0 /* txn control seems not improving anything so turn it off */
+-- 
+1.8.1.4
+

@@ -1,0 +1,268 @@
+From 3db0b40f39d05e2aeacd1fe0dbd69b77608aa34c Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Thu, 19 Jun 2014 17:28:39 -0700
+Subject: [PATCH 227/228] Ticket #47820 - 1.2.11 branch: coverity errors
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Description:
+* Deadcode
+1. Defect type: UNUSED_VALUE
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1894:returned_pointer – Pointer "slapdFrontendConfig" returned by "getFrontendConfig()" is never used.
+   Solution: removed the line 1894.
+
+* Clang
+1. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/valueset.c:1116:20:warning – Array access (via field 'va') results in a null pointer dereference
+2. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/valueset.c:1090:26:warning – Array access (via field 'va') results in a null pointer dereference
+   Solution: Added the code to check null dereference on vs->va on vs->va
+
+3. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1896:6:warning – Value stored to 'maxthreads' during its initialization is never read
+   Solution: removed the line 1896.
+
+4. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1894:25:warning – Value stored to 'slapdFrontendConfig' during its initialization is never read
+   Solution: Already addressed in Deadcode : 1. Defect type: UNUSED_VALUE
+
+5. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1091:21:warning – Dereference of null pointer (loaded from variable 'nap')
+   Solution: Added the code to check null dereference on nap and *nap.
+
+6. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/back-ldbm/ldbm_search.c:455:25:warning – Value stored to 'virtual_list_view' is never read
+   Solution: Porting bug (bz1109952; DS 47780).  Moved the line to the right position.
+
+7. Defect type: CLANG_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/back-ldbm/ldbm_add.c:1110:2:warning – Value stored to 'noabort' is never read
+   Solution: Removed unnecessary assignment.
+
+Compiler Warnings
+12. Defect type: COMPILER_WARNING
+2. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1896:warning – unused variable 'maxthreads'
+   Solution: already addressed 3. Defect type: CLANG_WARNING
+
+13. Defect type: COMPILER_WARNING
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1895:warning – unused variable 'idletimeout'
+   Solution: Removed the unused variable.
+
+14. Defect type: COMPILER_WARNING ¶
+1. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1894:warning – unused variable 'slapdFrontendConfig'
+   Solution: already addressed 1. Defect type: UNUSED_VALUE
+
+15. Defect type: COMPILER_WARNING
+2. 389-ds-base-1.2.11.15/ldap/servers/slapd/daemon.c:1788:warning – 'compute_idletimeout' defined but not used
+   Solution: removed the unused function.
+
+https://fedorahosted.org/389/ticket/47820
+
+Reviewed by rmeggins@redhat.com (Thanks, Rich!!)
+(cherry picked from commit ef7473dde11aa5c2b0041912b3f11099bb39ead8)
+---
+ ldap/servers/plugins/cos/cos_cache.c       | 13 +++++---
+ ldap/servers/slapd/back-ldbm/ldbm_add.c    |  1 -
+ ldap/servers/slapd/back-ldbm/ldbm_search.c | 50 ++++++++++++++----------------
+ ldap/servers/slapd/daemon.c                |  8 ++---
+ ldap/servers/slapd/valueset.c              |  7 ++++-
+ 5 files changed, 41 insertions(+), 38 deletions(-)
+
+diff --git a/ldap/servers/plugins/cos/cos_cache.c b/ldap/servers/plugins/cos/cos_cache.c
+index 1ff02f9..a89f5c5 100644
+--- a/ldap/servers/plugins/cos/cos_cache.c
++++ b/ldap/servers/plugins/cos/cos_cache.c
+@@ -942,7 +942,7 @@ cos_dn_defs_cb (Slapi_Entry* e, void *callback_data)
+ 			parent = slapi_create_dn_string("%s", orig);
+ 			if (!parent) {
+ 				parent = orig;
+-				LDAPDebug1Arg(LDAP_DEBUG_ANY, 
++				slapi_log_error(SLAPI_LOG_FATAL, COS_PLUGIN_SUBSYSTEM,
+ 				              "cos_dn_defs_cb: "
+ 				              "failed to normalize parent dn %s. "
+ 				              "Adding the pre normalized dn.\n", 
+@@ -959,18 +959,21 @@ cos_dn_defs_cb (Slapi_Entry* e, void *callback_data)
+ 			}
+ 			slapi_ch_free_string(&orig);
+ 		} else {
+-			LDAPDebug1Arg(LDAP_DEBUG_ANY, 
++			slapi_log_error(SLAPI_LOG_FATAL, COS_PLUGIN_SUBSYSTEM,
+ 			              "cos_dn_defs_cb: "
+ 			              "failed to get parent dn of cos definition %s.\n",
+ 			              pDn->val);
+ 			if (!pCosTemplateDn) {
+ 				if (!pCosTargetTree) {
+-					LDAPDebug0Args(LDAP_DEBUG_ANY, "cosTargetTree and cosTemplateDn are not set.\n");
++					slapi_log_error(SLAPI_LOG_FATAL, COS_PLUGIN_SUBSYSTEM,
++					                "cosTargetTree and cosTemplateDn are not set.\n");
+ 				} else {
+-					LDAPDebug0Args(LDAP_DEBUG_ANY, "cosTemplateDn is not set.\n");
++					slapi_log_error(SLAPI_LOG_FATAL, COS_PLUGIN_SUBSYSTEM,
++					                "cosTemplateDn is not set.\n");
+ 				}
+ 			} else if (!pCosTargetTree) {
+-				LDAPDebug0Args(LDAP_DEBUG_ANY, "cosTargetTree is not set.\n");
++				slapi_log_error(SLAPI_LOG_FATAL, COS_PLUGIN_SUBSYSTEM,
++				                "cosTargetTree is not set.\n");
+ 			}
+ 		}
+ 	}
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_add.c b/ldap/servers/slapd/back-ldbm/ldbm_add.c
+index b129307..6361bc7 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_add.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_add.c
+@@ -1107,7 +1107,6 @@ ldbm_back_add( Slapi_PBlock *pb )
+ 		}
+ 		goto error_return; 
+ 	}
+-	noabort = 1;
+ 
+ 	rc= 0;
+ 	goto common_return;
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_search.c b/ldap/servers/slapd/back-ldbm/ldbm_search.c
+index 626ba2e..46f7413 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_search.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_search.c
+@@ -462,34 +462,32 @@ ldbm_back_search( Slapi_PBlock *pb )
+                     }
+ 
+                 } else {
+-                    {
+-                        /* Access Control Check to see if the client is allowed to use the VLV Control. */
+-                        Slapi_Entry *feature;
+-                        int rc;
+-                        char dn[128];
+-                        char *dummyAttr = "dummy#attr";
+-                        char *dummyAttrs[2] = {NULL, NULL};
+-
+-                        dummyAttrs[0] = dummyAttr;
+-
+-                        /* This dn is normalized. */
+-                        PR_snprintf(dn, sizeof (dn), "dn: oid=%s,cn=features,cn=config", LDAP_CONTROL_VLVREQUEST);
+-                        feature = slapi_str2entry(dn, 0);
+-                        rc = plugin_call_acl_plugin(pb, feature, dummyAttrs, NULL, SLAPI_ACL_READ, ACLPLUGIN_ACCESS_DEFAULT, NULL);
+-                        slapi_entry_free(feature);
+-                        if (rc != LDAP_SUCCESS) {
+-                            /* Client isn't allowed to do this. */
+-                            return ldbm_back_search_cleanup(pb, li, sort_control,
++                    /* Access Control Check to see if the client is allowed to use the VLV Control. */
++                    Slapi_Entry *feature;
++                    int rc;
++                    char dn[128];
++                    char *dummyAttr = "dummy#attr";
++                    char *dummyAttrs[2] = {NULL, NULL};
++
++                    dummyAttrs[0] = dummyAttr;
++
++                    /* This dn is normalized. */
++                    PR_snprintf(dn, sizeof (dn), "dn: oid=%s,cn=features,cn=config", LDAP_CONTROL_VLVREQUEST);
++                    feature = slapi_str2entry(dn, 0);
++                    rc = plugin_call_acl_plugin(pb, feature, dummyAttrs, NULL, SLAPI_ACL_READ, ACLPLUGIN_ACCESS_DEFAULT, NULL);
++                    slapi_entry_free(feature);
++                    if (rc != LDAP_SUCCESS) {
++                        /* Client isn't allowed to do this. */
++                        return ldbm_back_search_cleanup(pb, li, sort_control,
+                                     rc, "VLV Control", SLAPI_FAIL_GENERAL,
+                                     &vlv_request_control, NULL, candidates);
+-                        }
+                     }
++                    /*
++                     * Sorting must always be critical for VLV; Force it be so.
++                     */
++                    is_sorting_critical= 1;
++                    virtual_list_view= 1;
+                 }
+-                /*
+-                 * Sorting must always be critical for VLV; Force it be so.
+-                 */
+-                is_sorting_critical= 1;
+-                virtual_list_view= 1;
+             }
+             else
+             {
+@@ -1407,7 +1405,7 @@ ldbm_back_next_search_entry_ext( Slapi_PBlock *pb, int use_extension )
+     back_txn               txn = {NULL};
+     int                    pr_idx = -1;
+     Slapi_Connection       *conn;
+-    Slapi_Operation        *op;
++    Slapi_Operation        *op = NULL;
+     int                    reverse_list = 0;
+ 
+     slapi_pblock_get( pb, SLAPI_SEARCH_TARGET_SDN, &basesdn );
+@@ -1791,7 +1789,7 @@ ldbm_back_next_search_entry_ext( Slapi_PBlock *pb, int use_extension )
+     }
+ 
+ bail:
+-    if(rc){
++    if(rc && op) {
+         op->o_reverse_search_state = 0;
+     }
+ 
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index ebd3e0f..9a362c7 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -1081,7 +1081,7 @@ void slapd_daemon( daemon_ports_t *ports )
+ 	if ( n_tcps != NULL ) {
+ 		PRFileDesc **fdesp;
+ 		PRNetAddr  **nap = ports->n_listenaddr;
+-		for (fdesp = n_tcps; fdesp && *fdesp; fdesp++, nap++) {
++		for (fdesp = n_tcps; fdesp && *fdesp && nap && *nap; fdesp++, nap++) {
+ 			if ( PR_Listen( *fdesp, config_get_listen_backlog_size() ) == PR_FAILURE ) {
+ 				PRErrorCode prerr = PR_GetError();
+ 				char		addrbuf[ 256 ];
+@@ -1779,6 +1779,7 @@ daemon_register_reslimits( void )
+ 			&idletimeout_reslimit_handle ));
+ }
+ 
++#if 0 /* NOT USED */
+ /*
+  * Compute the idle timeout for the connection.
+  *
+@@ -1826,7 +1827,7 @@ compute_idletimeout( slapdFrontendConfig_t *fecfg, Connection *conn )
+ 
+ 	return( idletimeout );
+ }
+-
++#endif
+ 
+ #ifdef _WIN32
+ static void
+@@ -1891,9 +1892,6 @@ handle_pr_read_ready(Connection_Table *ct, PRIntn num_poll)
+ {
+ 	Connection *c;
+ 	time_t curtime = current_time();
+-	slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
+-	int idletimeout;
+-	int maxthreads = config_get_maxthreadsperconn();
+ #if defined( XP_WIN32 )
+ 	int i;
+ #endif
+diff --git a/ldap/servers/slapd/valueset.c b/ldap/servers/slapd/valueset.c
+index 960ad79..5c1ae36 100644
+--- a/ldap/servers/slapd/valueset.c
++++ b/ldap/servers/slapd/valueset.c
+@@ -1038,7 +1038,7 @@ slapi_valueset_add_attr_valuearray_ext(const Slapi_Attr *a, Slapi_ValueSet *vs,
+ 	int passin = flags & SLAPI_VALUE_FLAG_PASSIN;
+ 	int dupcheck = flags & SLAPI_VALUE_FLAG_DUPCHECK;
+ 
+-	if (naddvals == 0) 
++	if (naddvals <= 0) 
+ 		return (rc);
+ 	
+ 	need = vs->num + naddvals + 1;
+@@ -1072,6 +1072,11 @@ slapi_valueset_add_attr_valuearray_ext(const Slapi_Attr *a, Slapi_ValueSet *vs,
+ 		}
+ 		vs->max= allocate;
+ 	}
++	if (NULL == vs->va) {
++		LDAPDebug1Arg(LDAP_DEBUG_ANY, "slapi_valueset_add_attr_valuearray_ext: "
++		              "%s: valuearray is NULL\n", a->a_type);
++		return LDAP_OPERATIONS_ERROR;
++	}
+ 
+ 	if ( (vs->num + naddvals > VALUESET_ARRAY_SORT_THRESHOLD || dupcheck ) && 
+ 		!vs->sorted ) {
+-- 
+1.8.1.4
+

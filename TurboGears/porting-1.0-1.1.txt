@@ -1,0 +1,28 @@
+TurboGears-1.1.x is supposed to be compatible with TurboGears-1.0.x but we've
+run into several problems in the apps we've written in Fedora.  This file lists
+the known incompatibilities and how to fix them.
+
+IdentityWrapper has moved
+=========================
+
+turbogears.identity has been reorganized.  In particular,
+turbogears.identity.IdentityWrapper has been moved to
+turbogears.identity.base.IdentityWrapper.  You can use code like this to work
+with both 1.0 and 1.1::
+    try:
+        from turbogears.identity import IdentityWrapper
+    except ImportError:
+        from turbogears.identity.base import IdentityWrapper
+
+Widget Change
+=============
+
+There's been changes to how widgets render.  In particular, when rendering a
+widget written in kid in a genshi template, the following code no longer
+works::
+    ${HTML(widget.render())}
+
+You can use this instead::
+    ${ET(widget.display())}
+
+

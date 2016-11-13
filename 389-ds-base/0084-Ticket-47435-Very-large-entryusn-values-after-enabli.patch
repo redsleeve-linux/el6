@@ -1,0 +1,109 @@
+From 7d1e56dc90ebea1f14d06de5a6124d4ed186115f Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 19 Jul 2013 13:45:22 -0700
+Subject: [PATCH 84/99] Ticket #47435 - Very large entryusn values after
+ enabling the USN plugin and the lastusn value is negative.
+
+1. Bug description: The initial value of lastusn is -1, but since
+the entryusn has the unsigned long long integer type, the server
+returns 18446744073709551615 == 0XFFFFFFFFFFFFFFFF.
+
+Fix description: The initial value "-1" is returned as it is.
+
+2. Bug description: Entryusn syntax is defined as an integer in
+the schema.  If negative values are accidentally stored in the
+entryusn value in the database, it was casted to the unsigned
+integer in the entryusn initialization code (usn_get_last_usn).
+
+Fix description: When an entryusn value is retrieved from the
+database, it's checked as a singed integer once and if it is
+negative, it's replaced with the initial value "-1".
+
+https://fedorahosted.org/389/ticket/47435
+
+Reviewed by Mark and Rich (Thank you!!)
+(cherry picked from commit c94da991450da486b2032815b867bd2548a1614c)
+(cherry picked from commit f54e44c138b0c56c2845d3614753d9ec5ebbdcba)
+---
+ ldap/servers/plugins/usn/usn.c           | 20 ++++++++++++++------
+ ldap/servers/slapd/back-ldbm/back-ldbm.h |  1 +
+ ldap/servers/slapd/back-ldbm/ldbm_usn.c  |  6 +++++-
+ 3 files changed, 20 insertions(+), 7 deletions(-)
+
+diff --git a/ldap/servers/plugins/usn/usn.c b/ldap/servers/plugins/usn/usn.c
+index 4473618..4eb6528 100644
+--- a/ldap/servers/plugins/usn/usn.c
++++ b/ldap/servers/plugins/usn/usn.c
+@@ -672,9 +672,13 @@ usn_rootdse_search(Slapi_PBlock *pb, Slapi_Entry* e, Slapi_Entry* entryAfter,
+         }
+         if (be && be->be_usn_counter) {
+             /* get a next USN counter from be_usn_counter; 
+-             * then minus 1 from it */
+-            PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRIu64,
+-                                slapi_counter_get_value(be->be_usn_counter)-1);
++             * then minus 1 from it (except if be_usn_counter has value 0) */
++            if (slapi_counter_get_value(be->be_usn_counter)) {
++                PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRIu64,
++                            slapi_counter_get_value(be->be_usn_counter)-1);
++            } else {
++                PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "-1");
++            }
+             usn_berval.bv_len = strlen(usn_berval.bv_val);
+             slapi_entry_attr_replace(e, attr, vals);
+         }
+@@ -691,9 +695,13 @@ usn_rootdse_search(Slapi_PBlock *pb, Slapi_Entry* e, Slapi_Entry* entryAfter,
+                 continue;
+             }
+             /* get a next USN counter from be_usn_counter; 
+-             * then minus 1 from it */
+-            PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRIu64,
+-                                slapi_counter_get_value(be->be_usn_counter)-1);
++             * then minus 1 from it (except if be_usn_counter has value 0) */
++            if (slapi_counter_get_value(be->be_usn_counter)) {
++                PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "%" NSPRIu64,
++                            slapi_counter_get_value(be->be_usn_counter)-1);
++            } else {
++                PR_snprintf(usn_berval.bv_val, USN_COUNTER_BUF_LEN, "-1");
++            }
+             usn_berval.bv_len = strlen(usn_berval.bv_val);
+     
+             if (USN_LAST_USN_ATTR_CORE_LEN+strlen(be->be_name)+2 > attr_len) {
+diff --git a/ldap/servers/slapd/back-ldbm/back-ldbm.h b/ldap/servers/slapd/back-ldbm/back-ldbm.h
+index 3330449..61c7af9 100644
+--- a/ldap/servers/slapd/back-ldbm/back-ldbm.h
++++ b/ldap/servers/slapd/back-ldbm/back-ldbm.h
+@@ -868,6 +868,7 @@ typedef struct _back_search_result_set
+ #define LDBM_ERROR_FOUND_DUPDN 9999
+ 
+ /* Initial entryusn value */
++#define SIGNEDINITIALUSN (-1)
+ #define INITIALUSN (PRUint64)(-1)
+ 
+ /* changelog backup dir name 
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_usn.c b/ldap/servers/slapd/back-ldbm/ldbm_usn.c
+index 403e279..7c11a68 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_usn.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_usn.c
+@@ -124,6 +124,7 @@ usn_get_last_usn(Slapi_Backend *be, PRUint64 *last_usn)
+     DBC *dbc = NULL;
+     DBT key;              /* For the last usn */
+     DBT value;
++    PRInt64 signed_last_usn;
+ 
+     if (NULL == last_usn) {
+         return rc;
+@@ -167,7 +168,10 @@ usn_get_last_usn(Slapi_Backend *be, PRUint64 *last_usn)
+             p = (char *)key.data;
+         }
+         if (0 == rc) {
+-            *last_usn = strtoll(++p, (char **)NULL, 0); /* key.data: =num */
++            signed_last_usn = strtoll(++p, (char **)NULL, 0); /* key.data: =num */
++            if (signed_last_usn > SIGNEDINITIALUSN) {
++                *last_usn = signed_last_usn;
++            }
+         }
+     } else if (DB_NOTFOUND == rc) {
+         /* if empty, it's okay.  This is just a beginning. */
+-- 
+1.8.1.4
+

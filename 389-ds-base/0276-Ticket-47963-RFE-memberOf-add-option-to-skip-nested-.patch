@@ -1,0 +1,163 @@
+From df22a314aa4a333e491b702fa020d7fbc3a38bad Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Mon, 24 Nov 2014 16:58:57 -0500
+Subject: [PATCH 276/305] Ticket 47963 - RFE - memberOf - add option to skip
+ nested group lookups during delete operations
+
+Bug Description:  The recursive nested group lookups performed during a group delete
+                  operation can take a very long time to complete if there are very
+                  large static groups(groups with with over 10K members).
+
+                  If there are no nested groups, then it would be nice to have an option
+                  to skip the nested group check, which would significantly improve
+                  delete performance.
+
+Fix Description:  Added a new memberOf plugin configuration attribute:
+
+                      memberOfSkipNested: on|off
+
+https://fedorahosted.org/389/ticket/47963
+
+Reviewed by: rmeggins(Thanks!)
+
+(cherry picked from commit b01cf4dbf9c8995081da81e39f8766d2df9e0c2d)
+
+Conflicts:
+	ldap/servers/plugins/memberof/memberof.h
+	ldap/servers/plugins/memberof/memberof_config.c
+
+(cherry picked from commit 9cce9c4bc7b212a7c819ee2c3ea040ed5b282017)
+
+Conflicts:
+	ldap/servers/plugins/memberof/memberof.h
+	ldap/servers/plugins/memberof/memberof_config.c
+
+(cherry picked from commit 250fcdbb463d2f4597a61ef1e364f71fa01ef1be)
+(cherry picked from commit ec0b121e65800e4664fafb9001b0e9118ca45464)
+---
+ ldap/servers/plugins/memberof/memberof.c        |  6 ++++--
+ ldap/servers/plugins/memberof/memberof.h        |  3 +++
+ ldap/servers/plugins/memberof/memberof_config.c | 28 +++++++++++++++++++++++++
+ 3 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/plugins/memberof/memberof.c b/ldap/servers/plugins/memberof/memberof.c
+index 19fb8a5..d81d9ab 100644
+--- a/ldap/servers/plugins/memberof/memberof.c
++++ b/ldap/servers/plugins/memberof/memberof.c
+@@ -2465,8 +2465,10 @@ int memberof_fix_memberof_callback(Slapi_Entry *e, void *callback_data)
+ 	memberof_del_dn_data del_data = {0, config->memberof_attr};
+ 	Slapi_ValueSet *groups = 0;
+ 
+-	/* get a list of all of the groups this user belongs to */
+-	groups = memberof_get_groups(config, sdn);
++	if(!config->skip_nested){
++		/* get a list of all of the groups this user belongs to */
++		groups = memberof_get_groups(config, sdn);
++	}
+ 
+ 	/* If we found some groups, replace the existing memberOf attribute
+ 	 * with the found values.  */
+diff --git a/ldap/servers/plugins/memberof/memberof.h b/ldap/servers/plugins/memberof/memberof.h
+index 65398aa..4add6f6 100644
+--- a/ldap/servers/plugins/memberof/memberof.h
++++ b/ldap/servers/plugins/memberof/memberof.h
+@@ -66,6 +66,8 @@
+ #define MEMBEROF_GROUP_ATTR "memberOfGroupAttr"
+ #define MEMBEROF_ATTR "memberOfAttr"
+ #define MEMBEROF_BACKEND_ATTR "memberOfAllBackends"
++#define MEMBEROF_SKIP_NESTED_ATTR "memberOfSkipNested"
++
+ #define DN_SYNTAX_OID "1.3.6.1.4.1.1466.115.121.1.12"
+ #define NAME_OPT_UID_SYNTAX_OID "1.3.6.1.4.1.1466.115.121.1.34"
+ 
+@@ -79,6 +81,7 @@ typedef struct memberofconfig {
+ 	int allBackends;
+ 	Slapi_Filter *group_filter;
+ 	Slapi_Attr **group_slapiattrs;
++	int skip_nested;
+ } MemberOfConfig;
+ 
+ 
+diff --git a/ldap/servers/plugins/memberof/memberof_config.c b/ldap/servers/plugins/memberof/memberof_config.c
+index 3fd63a9..6c97c0f 100644
+--- a/ldap/servers/plugins/memberof/memberof_config.c
++++ b/ldap/servers/plugins/memberof/memberof_config.c
+@@ -165,6 +165,7 @@ memberof_validate_config (Slapi_PBlock *pb, Slapi_Entry* entryBefore, Slapi_Entr
+ 	Slapi_Attr *memberof_attr = NULL;
+ 	Slapi_Attr *group_attr = NULL;
+ 	char *syntaxoid = NULL;
++	char *skip_nested = NULL;
+ 	int not_dn_syntax = 0;
+ 
+ 	*returncode = LDAP_UNWILLING_TO_PERFORM; /* be pessimistic */
+@@ -244,6 +245,18 @@ memberof_validate_config (Slapi_PBlock *pb, Slapi_Entry* entryBefore, Slapi_Entr
+ 			MEMBEROF_GROUP_ATTR, MEMBEROF_ATTR); 
+ 	}
+ 
++	if ((skip_nested = slapi_entry_attr_get_charptr(e, MEMBEROF_SKIP_NESTED_ATTR))){
++		if(strcasecmp(skip_nested, "on") != 0 && strcasecmp(skip_nested, "off") != 0){
++			PR_snprintf(returntext, SLAPI_DSE_RETURNTEXT_SIZE,
++				"The %s configuration attribute must be set to "
++				"\"on\" or \"off\".  (illegal value: %s)",
++				MEMBEROF_SKIP_NESTED_ATTR, skip_nested);
++			*returncode = LDAP_UNWILLING_TO_PERFORM;
++		}
++	}
++
++	slapi_ch_free_string(&skip_nested);
++
+ 	if (*returncode != LDAP_SUCCESS)
+ 	{
+ 		return SLAPI_DSE_CALLBACK_ERROR;
+@@ -271,12 +284,14 @@ memberof_apply_config (Slapi_PBlock *pb, Slapi_Entry* entryBefore, Slapi_Entry*
+ 	int num_groupattrs = 0;
+ 	int groupattr_name_len = 0;
+ 	char *allBackends = NULL;
++	char *skip_nested = NULL;
+ 
+ 	*returncode = LDAP_SUCCESS;
+ 
+ 	groupattrs = slapi_entry_attr_get_charray(e, MEMBEROF_GROUP_ATTR);
+ 	memberof_attr = slapi_entry_attr_get_charptr(e, MEMBEROF_ATTR);
+ 	allBackends = slapi_entry_attr_get_charptr(e, MEMBEROF_BACKEND_ATTR);
++	skip_nested = slapi_entry_attr_get_charptr(e, MEMBEROF_SKIP_NESTED_ATTR);
+ 
+ 	/* We want to be sure we don't change the config in the middle of
+ 	 * a memberOf operation, so we obtain an exclusive lock here */
+@@ -375,6 +390,14 @@ memberof_apply_config (Slapi_PBlock *pb, Slapi_Entry* entryBefore, Slapi_Entry*
+ 		memberof_attr = NULL; /* config now owns memory */
+ 	}
+ 
++	if (skip_nested){
++		if(strcasecmp(skip_nested,"on") == 0){
++			theConfig.skip_nested = 1;
++		} else {
++			theConfig.skip_nested = 0;
++		}
++	}
++
+ 	if (allBackends)
+ 	{
+ 		if(strcasecmp(allBackends,"on")==0){
+@@ -392,6 +415,7 @@ memberof_apply_config (Slapi_PBlock *pb, Slapi_Entry* entryBefore, Slapi_Entry*
+ 	slapi_ch_array_free(groupattrs);
+ 	slapi_ch_free_string(&memberof_attr);
+ 	slapi_ch_free_string(&allBackends);
++	slapi_ch_free_string(&skip_nested);
+ 
+ 	if (*returncode != LDAP_SUCCESS)
+ 	{
+@@ -464,6 +488,10 @@ memberof_copy_config(MemberOfConfig *dest, MemberOfConfig *src)
+ 			dest->memberof_attr = slapi_ch_strdup(src->memberof_attr);
+ 		}
+ 
++		if(src->skip_nested){
++			dest->skip_nested = src->skip_nested;
++		}
++
+ 		if(src->allBackends)
+ 		{
+ 			dest->allBackends = src->allBackends;
+-- 
+1.9.3
+

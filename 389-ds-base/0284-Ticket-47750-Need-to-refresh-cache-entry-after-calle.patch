@@ -1,0 +1,53 @@
+From b4ef87c201238452b4f7653cce127d4b23ea4106 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 16 Dec 2014 10:37:02 -0500
+Subject: [PATCH 284/305] Ticket 47750 - Need to refresh cache entry after
+ called betxn postop plugins
+
+Bug Description:  If deleting an entry triggers multiple betxn plugins, the
+                  entry might not be removed the cache - which prevents that
+                  same entry(same dn) from being re-added(error 68).  For
+                  example, the RI and memberOf plugins are enabled.  Then we
+                  add a user to a group.  This adds the memberOf attribute
+                  to the entry.  We then delete that user, which triggers the
+                  RI plugin, which then triggers the memberOf plugin.  So the
+                  entry that is deleted gets modified in bvetxn postop, and
+                  has its its cache entry replaced.  This then confuses the
+                  cache logic at the end of the delete operation, and the entry
+                  is not removed from the cache.
+
+Fix Description:  Refresh the cache entry after calling the betxn postop plugins.
+                  If the entry has changed, return the old old entry and proceed
+                  with the new one.
+
+https://fedorahosted.org/389/ticket/47750
+
+Reviewed by: nhosoi & rmeggins (Thanks!!)
+
+(cherry picked from commit 4a5eee63f45ed290375440827c92af9b2347a177)
+(cherry picked from commit 5ef3183a434e694c120536c073a6f9f6e4cfa898)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_delete.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_delete.c b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+index e06f241..e86d45f 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_delete.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+@@ -1116,6 +1116,13 @@ ldbm_back_delete( Slapi_PBlock *pb )
+ 
+ 	/* delete from cache and clean up */
+ 	if (e) {
++		struct backentry *old_e = e;
++
++		e = cache_find_id(&inst->inst_cache,e->ep_id);
++		if(e != old_e){
++			/* return the old entry, and proceed with the new one */
++			CACHE_RETURN(&inst->inst_cache, &old_e);
++		}
+ 		if (cache_is_in_cache(&inst->inst_cache, e)) {
+ 			ep_id = e->ep_id;
+ 			CACHE_REMOVE(&inst->inst_cache, e);
+-- 
+1.9.3
+

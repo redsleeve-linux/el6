@@ -1,0 +1,484 @@
+From 1f463f1401b0adfd12cca7851d57a72fa6c58ce0 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Wed, 5 Jun 2013 12:15:05 -0400
+Subject: [PATCH 91/99] Coverity Fixes (Part 3)
+
+11692 - Explicit null dereferenced (libavl/avl.c)
+11695 - Explicit null dereferenced (cb_conn_stateless.c)
+11696 - Explicit null dereferenced (memberof_config.c)
+11697 - Explicit null dereferenced (memberof.c)
+11698 - Explicit null dereferenced (memberof.c)
+11699 - Explicit null dereferenced (memberof.c)
+11700 - Explicit null dereferenced (memberof.c)
+11701 - Explicit null dereferenced (cl5_api.c)
+11702 - Explicit null dereferenced (cl5_api.c)
+11703 - Dereference after null check (cl5_clcache.c)
+11704 - Dereference after null check (repl5_replica_config.c)
+11705 - Explicit null dereferenced (syntaxes/string.c)
+11706 - Dereference after null check (plugin.c)
+11707 - Dereference after null check (plugin.c)
+11711 - Dereference after null check (ldif2ldbm.c)
+11726 - Dereference after null check (valueset.c)
+11729 - Explicit null dereferenced (libaccess/oneeval.cpp)
+11744 - Explicit null dereferenced (dbverify.c)
+11745 - Out-of-bounds read (linked_attrs.c)
+11745 - Out-of-bounds read (memberof.c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=970221
+
+Reviewed by: richm(Thanks!)
+(cherry picked from commit 36f25726b9723f743bc240cb44b88f74ad478ef2)
+---
+ ldap/libraries/libavl/avl.c                         |  7 +++++--
+ ldap/servers/plugins/chainingdb/cb_conn_stateless.c |  2 +-
+ ldap/servers/plugins/linkedattrs/linked_attrs.c     | 17 ++++++++++++++---
+ ldap/servers/plugins/memberof/memberof.c            | 18 ++++++++++++++----
+ ldap/servers/plugins/memberof/memberof_config.c     |  2 +-
+ ldap/servers/plugins/replication/cl5_api.c          | 17 ++++++++++++++++-
+ ldap/servers/plugins/replication/cl5_clcache.c      | 11 ++++++++---
+ .../plugins/replication/repl5_replica_config.c      |  5 +++++
+ ldap/servers/plugins/syntaxes/string.c              | 14 +++++++++-----
+ ldap/servers/slapd/back-ldbm/dbverify.c             |  6 ++++--
+ ldap/servers/slapd/back-ldbm/ldif2ldbm.c            | 16 ++++++++++++----
+ ldap/servers/slapd/dn.c                             |  1 +
+ ldap/servers/slapd/plugin.c                         | 21 +++++++++++++++------
+ ldap/servers/slapd/valueset.c                       | 17 ++++++++++-------
+ lib/libaccess/oneeval.cpp                           | 12 ++++++------
+ 15 files changed, 121 insertions(+), 45 deletions(-)
+
+diff --git a/ldap/libraries/libavl/avl.c b/ldap/libraries/libavl/avl.c
+index 7577891..18c43e0 100644
+--- a/ldap/libraries/libavl/avl.c
++++ b/ldap/libraries/libavl/avl.c
+@@ -780,8 +780,11 @@ avl_getfirst( Avlnode *root )
+ 		return( 0 );
+ 
+ 	(void) avl_apply( root, avl_buildlist, (caddr_t) 0, -1, AVL_INORDER );
+-
+-	return( avl_list[ avl_nextlist++ ] );
++	if(avl_list && avl_list[avl_nextlist++]){
++		return avl_list[avl_nextlist];
++	} else {
++		return( NULL );
++	}
+ }
+ 
+ caddr_t
+diff --git a/ldap/servers/plugins/chainingdb/cb_conn_stateless.c b/ldap/servers/plugins/chainingdb/cb_conn_stateless.c
+index a9abc31..a85b392 100644
+--- a/ldap/servers/plugins/chainingdb/cb_conn_stateless.c
++++ b/ldap/servers/plugins/chainingdb/cb_conn_stateless.c
+@@ -856,7 +856,7 @@ void cb_stale_all_connections( cb_backend_instance * cb)
+ 	    else {
+        	       	if (conn==pools[i]->conn.conn_list) {
+        	       		pools[i]->conn.conn_list=next_conn;
+-       	       	} else {
++       	       	} else if(prev_conn){
+        	       		prev_conn->next=next_conn;
+        	       	}
+        	       	cb_close_and_dispose_connection(conn);
+diff --git a/ldap/servers/plugins/linkedattrs/linked_attrs.c b/ldap/servers/plugins/linkedattrs/linked_attrs.c
+index ff3dc3a..4bea10f 100644
+--- a/ldap/servers/plugins/linkedattrs/linked_attrs.c
++++ b/ldap/servers/plugins/linkedattrs/linked_attrs.c
+@@ -1231,10 +1231,21 @@ linked_attrs_load_array(Slapi_Value **array, Slapi_Attr *attr)
+ int
+ linked_attrs_compare(const void *a, const void *b)
+ {
++        Slapi_Value *val1;
++        Slapi_Value *val2;
++        Slapi_Attr *linkattr;
+         int rc = 0;
+-        Slapi_Value *val1 = *((Slapi_Value **)a);
+-        Slapi_Value *val2 = *((Slapi_Value **)b);
+-        Slapi_Attr *linkattr = slapi_attr_new();
++
++        if(a == NULL && b != NULL){
++            return 1;
++        } else if(a != NULL && b == NULL){
++            return -1;
++        } else if(a == NULL && b == NULL){
++            return 0;
++        }
++        val1 = *((Slapi_Value **)a);
++        val2 = *((Slapi_Value **)b);
++        linkattr = slapi_attr_new();
+ 
+         slapi_attr_init(linkattr, "distinguishedName");
+ 
+diff --git a/ldap/servers/plugins/memberof/memberof.c b/ldap/servers/plugins/memberof/memberof.c
+index a3f875d..d11983b 100644
+--- a/ldap/servers/plugins/memberof/memberof.c
++++ b/ldap/servers/plugins/memberof/memberof.c
+@@ -460,7 +460,7 @@ memberof_del_dn_from_groups(Slapi_PBlock *pb, MemberOfConfig *config, Slapi_DN *
+ 	/* Loop through each grouping attribute to find groups that have
+ 	 * dn as a member.  For any matches, delete the dn value from the
+ 	 * same grouping attribute. */
+-	for (i = 0; config->groupattrs[i]; i++)
++	for (i = 0; config->groupattrs && config->groupattrs[i]; i++)
+ 	{
+ 		memberof_del_dn_data data = {(char *)slapi_sdn_get_dn(sdn),
+ 		                             config->groupattrs[i]};
+@@ -712,7 +712,7 @@ memberof_replace_dn_from_groups(Slapi_PBlock *pb, MemberOfConfig *config,
+ 	/* Loop through each grouping attribute to find groups that have
+ 	 * pre_dn as a member.  For any matches, replace pre_dn with post_dn
+ 	 * using the same grouping attribute. */
+-	for (i = 0; config->groupattrs[i]; i++)
++	for (i = 0; config->groupattrs && config->groupattrs[i]; i++)
+ 	{
+ 		replace_dn_data data = {(char *)slapi_sdn_get_ndn(pre_sdn),
+ 		                        (char *)slapi_sdn_get_ndn(post_sdn),
+@@ -2203,8 +2203,18 @@ void memberof_load_array(Slapi_Value **array, Slapi_Attr *attr)
+  */
+ int memberof_compare(MemberOfConfig *config, const void *a, const void *b)
+ {
+-	Slapi_Value *val1 = *((Slapi_Value **)a);
+-	Slapi_Value *val2 = *((Slapi_Value **)b);
++	Slapi_Value *val1;
++	Slapi_Value *val2;
++
++	if(a == NULL && b != NULL){
++		return 1;
++	} else if(a != NULL && b == NULL){
++		return -1;
++	} else if(a == NULL && b == NULL){
++		return 0;
++	}
++	val1 = *((Slapi_Value **)a);
++	val2 = *((Slapi_Value **)b);
+ 
+ 	/* We only need to provide a Slapi_Attr here for it's syntax.  We
+ 	 * already validated all grouping attributes to use the Distinguished
+diff --git a/ldap/servers/plugins/memberof/memberof_config.c b/ldap/servers/plugins/memberof/memberof_config.c
+index b4d557a..3fd63a9 100644
+--- a/ldap/servers/plugins/memberof/memberof_config.c
++++ b/ldap/servers/plugins/memberof/memberof_config.c
+@@ -486,7 +486,7 @@ memberof_free_config(MemberOfConfig *config)
+ 		slapi_ch_array_free(config->groupattrs);
+ 		slapi_filter_free(config->group_filter, 1);
+ 
+-		for (i = 0; config->group_slapiattrs[i]; i++)
++		for (i = 0; config->group_slapiattrs && config->group_slapiattrs[i]; i++)
+ 		{
+ 			slapi_attr_free(&config->group_slapiattrs[i]);
+ 		}
+diff --git a/ldap/servers/plugins/replication/cl5_api.c b/ldap/servers/plugins/replication/cl5_api.c
+index a06c43f..f17650d 100644
+--- a/ldap/servers/plugins/replication/cl5_api.c
++++ b/ldap/servers/plugins/replication/cl5_api.c
+@@ -3506,6 +3506,13 @@ static void _cl5TrimFile (Object *obj, long *numToTrim, ReplicaId cleaned_rid)
+ 			 * This change can be trimmed if it exceeds purge
+ 			 * parameters and has been seen by all consumers.
+ 			 */
++			if(op.csn == NULL){
++				slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name_cl, "_cl5TrimFile: "
++						"Operation missing csn, moving on to next entry.\n");
++				cl5_operation_parameters_done (&op);
++				finished =_cl5GetNextEntry (&entry, it);
++				continue;
++			}
+ 			csn_rid = csn_get_replicaid (op.csn);
+ 			if ( (*numToTrim > 0 || _cl5CanTrim (entry.time, numToTrim)) &&
+ 				 ruv_covers_csn_strict (ruv, op.csn) )
+@@ -3835,7 +3842,15 @@ static int  _cl5ConstructRUV (const char *replGen, Object *obj, PRBool purge)
+     rc = _cl5GetFirstEntry (obj, &entry, &iterator, NULL);
+     while (rc == CL5_SUCCESS)
+     {
+-        rid = csn_get_replicaid (op.csn);
++        if(op.csn){
++            rid = csn_get_replicaid (op.csn);
++        } else {
++            slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name_cl, "_cl5ConstructRUV: "
++                "Operation missing csn, moving on to next entry.\n");
++            cl5_operation_parameters_done (&op);
++            rc = _cl5GetNextEntry (&entry, iterator);
++            continue;
++        }
+         if(is_cleaned_rid(rid)){
+             /* skip this entry as the rid is invalid */
+             slapi_log_error(SLAPI_LOG_REPL, repl_plugin_name_cl, "_cl5ConstructRUV: "
+diff --git a/ldap/servers/plugins/replication/cl5_clcache.c b/ldap/servers/plugins/replication/cl5_clcache.c
+index 5329b4b..67e64f5 100644
+--- a/ldap/servers/plugins/replication/cl5_clcache.c
++++ b/ldap/servers/plugins/replication/cl5_clcache.c
+@@ -750,9 +750,14 @@ clcache_skip_change ( CLC_Buffer *buf )
+ 		 */
+ 		if ( csn_time_difference(buf->buf_current_csn, cscb->local_maxcsn) == 0 &&
+ 			 (csn_get_seqnum(buf->buf_current_csn) ==
+-				csn_get_seqnum(cscb->local_maxcsn) + 1) ) {
+-			csn_init_by_csn ( cscb->local_maxcsn, buf->buf_current_csn );
+-			csn_init_by_csn ( cscb->consumer_maxcsn, buf->buf_current_csn );
++				csn_get_seqnum(cscb->local_maxcsn) + 1) )
++		{
++			if(cscb->local_maxcsn){
++				csn_init_by_csn ( cscb->local_maxcsn, buf->buf_current_csn );
++			}
++			if(cscb->consumer_maxcsn){
++				csn_init_by_csn ( cscb->consumer_maxcsn, buf->buf_current_csn );
++			}
+ 			skip = 0;
+ 			break;
+ 		}
+diff --git a/ldap/servers/plugins/replication/repl5_replica_config.c b/ldap/servers/plugins/replication/repl5_replica_config.c
+index 7c625eb..7b684e9 100644
+--- a/ldap/servers/plugins/replication/repl5_replica_config.c
++++ b/ldap/servers/plugins/replication/repl5_replica_config.c
+@@ -2366,6 +2366,11 @@ delete_cleaned_rid_config(cleanruv_data *clean_data)
+     int found = 0, i;
+     int rc, ret, rid;
+ 
++    if(clean_data == NULL){
++        slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name, "delete_cleaned_rid_config: cleanruv data is NULL, "
++                "failed to clean the config.\n");
++        return;
++    }
+     /*
+      *  If there is no maxcsn, set the proper csnstr
+      */
+diff --git a/ldap/servers/plugins/syntaxes/string.c b/ldap/servers/plugins/syntaxes/string.c
+index 54cd7c8..6c0da94 100644
+--- a/ldap/servers/plugins/syntaxes/string.c
++++ b/ldap/servers/plugins/syntaxes/string.c
+@@ -84,7 +84,11 @@ string_filter_ava( struct berval *bvfilter, Slapi_Value **bvals, int syntax,
+ 			bvfilter_norm.bv_val = alt;
+ 			alt = NULL;
+ 		}
+-		bvfilter_norm.bv_len = strlen(bvfilter_norm.bv_val);
++		if(bvfilter_norm.bv_val){
++			bvfilter_norm.bv_len = strlen(bvfilter_norm.bv_val);
++		} else {
++			bvfilter_norm.bv_len = 0;
++		}
+ 	}
+ 
+ 	for ( i = 0; (bvals != NULL) && (bvals[i] != NULL); i++ ) {
+@@ -103,7 +107,7 @@ string_filter_ava( struct berval *bvfilter, Slapi_Value **bvals, int syntax,
+ 							    if(retVal) {
+ 									*retVal = bvals[i];
+ 								}
+-								slapi_ch_free ((void**)&bvfilter_norm.bv_val);
++								slapi_ch_free_string(&bvfilter_norm.bv_val);
+                                 return( 0 );
+                         }
+                         break;
+@@ -112,7 +116,7 @@ string_filter_ava( struct berval *bvfilter, Slapi_Value **bvals, int syntax,
+ 							    if(retVal) {
+ 									*retVal = bvals[i];
+ 								}
+-								slapi_ch_free ((void**)&bvfilter_norm.bv_val);
++								slapi_ch_free_string(&bvfilter_norm.bv_val);
+                                 return( 0 );
+                         }
+                         break;
+@@ -121,14 +125,14 @@ string_filter_ava( struct berval *bvfilter, Slapi_Value **bvals, int syntax,
+ 							    if(retVal) {
+ 									*retVal = bvals[i];
+ 								}
+-								slapi_ch_free ((void**)&bvfilter_norm.bv_val);
++								slapi_ch_free_string(&bvfilter_norm.bv_val);
+                                 return( 0 );
+                         }
+                         break;
+                 }
+         }
+ 
+-	slapi_ch_free ((void**)&bvfilter_norm.bv_val);
++	slapi_ch_free_string(&bvfilter_norm.bv_val);
+ 	return( -1 );
+ }
+ 
+diff --git a/ldap/servers/slapd/back-ldbm/dbverify.c b/ldap/servers/slapd/back-ldbm/dbverify.c
+index 43fc9d5..ffd5900 100644
+--- a/ldap/servers/slapd/back-ldbm/dbverify.c
++++ b/ldap/servers/slapd/back-ldbm/dbverify.c
+@@ -119,9 +119,11 @@ dbverify_ext( ldbm_instance *inst, int verbose )
+             char *p = NULL;
+             p = strstr(filep, LDBM_FILENAME_SUFFIX); /* since already checked,
+                                                         it must have it */
+-            *p = '\0';
++            if(p)
++                *p = '\0';
+             ainfo_get( inst->inst_be, filep+1, &ai );
+-            *p = '.';
++            if(p)
++                *p = '.';
+             if (ai->ai_key_cmp_fn) {
+                 dbp->app_private = (void *)ai->ai_key_cmp_fn;
+                 dbp->set_bt_compare(dbp, dblayer_bt_compare);
+diff --git a/ldap/servers/slapd/back-ldbm/ldif2ldbm.c b/ldap/servers/slapd/back-ldbm/ldif2ldbm.c
+index c802ff2..47e0269 100644
+--- a/ldap/servers/slapd/back-ldbm/ldif2ldbm.c
++++ b/ldap/servers/slapd/back-ldbm/ldif2ldbm.c
+@@ -2246,15 +2246,23 @@ ldbm_back_ldbm2index(Slapi_PBlock *pb)
+          * Update the Virtual List View indexes
+          */
+         for ( vlvidx = 0; vlvidx < numvlv; vlvidx++ ) {
++            char *ai = "Unknown index";
++
+             if ( g_get_shutdown() || c_get_shutdown() ) {
+                 goto err_out;
+             }
++            if(indexAttrs){
++                  if(indexAttrs[vlvidx]){
++                      ai = indexAttrs[vlvidx];
++                  }
++            }
+             if (!run_from_cmdline) {
+                 rc = dblayer_txn_begin(li, NULL, &txn);
+                 if (0 != rc) {
++
+                     LDAPDebug(LDAP_DEBUG_ANY,
+                       "%s: ERROR: failed to begin txn for update index '%s'\n",
+-                      inst->inst_name, indexAttrs[vlvidx], 0);
++                      inst->inst_name, ai, 0);
+                     LDAPDebug(LDAP_DEBUG_ANY,
+                         "%s: Error %d: %s\n", inst->inst_name, rc,
+                         dblayer_strerror(rc));
+@@ -2262,7 +2270,7 @@ ldbm_back_ldbm2index(Slapi_PBlock *pb)
+                         slapi_task_log_notice(task,
+                          "%s: ERROR: failed to begin txn for update index '%s' "
+                          "(err %d: %s)", inst->inst_name,
+-                         indexAttrs[vlvidx], rc, dblayer_strerror(rc));
++                         ai, rc, dblayer_strerror(rc));
+                     }
+                     return_value = -2;
+                     goto err_out;
+@@ -2281,7 +2289,7 @@ ldbm_back_ldbm2index(Slapi_PBlock *pb)
+                 if (0 != rc) {
+                     LDAPDebug(LDAP_DEBUG_ANY,
+                       "%s: ERROR: failed to commit txn for update index '%s'\n",
+-                      inst->inst_name, indexAttrs[vlvidx], 0);
++                      inst->inst_name, ai, 0);
+                     LDAPDebug(LDAP_DEBUG_ANY,
+                         "%s: Error %d: %s\n", inst->inst_name, rc,
+                         dblayer_strerror(rc));
+@@ -2289,7 +2297,7 @@ ldbm_back_ldbm2index(Slapi_PBlock *pb)
+                         slapi_task_log_notice(task,
+                         "%s: ERROR: failed to commit txn for update index '%s' "
+                         "(err %d: %s)", inst->inst_name,
+-                        indexAttrs[vlvidx], rc, dblayer_strerror(rc));
++                        ai, rc, dblayer_strerror(rc));
+                     }
+                     return_value = -2;
+                     goto err_out;
+diff --git a/ldap/servers/slapd/dn.c b/ldap/servers/slapd/dn.c
+index 2f50e97..dda439b 100644
+--- a/ldap/servers/slapd/dn.c
++++ b/ldap/servers/slapd/dn.c
+@@ -2614,3 +2614,4 @@ slapi_sdn_get_size(const Slapi_DN *sdn)
+     }
+     return sz;
+ }
++
+diff --git a/ldap/servers/slapd/plugin.c b/ldap/servers/slapd/plugin.c
+index 436cc02..0a4f4e0 100644
+--- a/ldap/servers/slapd/plugin.c
++++ b/ldap/servers/slapd/plugin.c
+@@ -1493,15 +1493,24 @@ int
+ slapi_berval_cmp (const struct berval* L, const struct berval* R) /* JCM - This does not belong here. But, where should it go? */
+ {
+     int result = 0;
++
++    if(L == NULL && R != NULL){
++        return 1;
++    } else if(L != NULL && R == NULL){
++        return -1;
++    } else if(L == NULL && R == NULL){
++        return 0;
++    }
+     if (L->bv_len < R->bv_len) {
+-	result = memcmp (L->bv_val, R->bv_val, L->bv_len);
+-	if (result == 0)
+-	  result = -1;
++        result = memcmp (L->bv_val, R->bv_val, L->bv_len);
++        if (result == 0)
++            result = -1;
+     } else {
+-	result = memcmp (L->bv_val, R->bv_val, R->bv_len);
+-	if (result == 0 && (L->bv_len > R->bv_len))
+-	  result = 1;
++        result = memcmp (L->bv_val, R->bv_val, R->bv_len);
++        if (result == 0 && (L->bv_len > R->bv_len))
++            result = 1;
+     }
++
+     return result;
+ }
+ 
+diff --git a/ldap/servers/slapd/valueset.c b/ldap/servers/slapd/valueset.c
+index a91256c..f04acc3 100644
+--- a/ldap/servers/slapd/valueset.c
++++ b/ldap/servers/slapd/valueset.c
+@@ -190,20 +190,23 @@ valuearray_add_valuearray(Slapi_Value ***vals, Slapi_Value **addvals, PRUint32 f
+ {
+     int valslen;
+     int addvalslen;
+-	int maxvals;
++    int maxvals;
+ 
+-	addvalslen= valuearray_count(addvals);
++    if(vals == NULL){
++        return;
++    }
++    addvalslen= valuearray_count(addvals);
+     if(*vals == NULL)
+     {
+-		valslen= 0;
+-		maxvals= 0;
++        valslen= 0;
++        maxvals= 0;
+     }
+     else
+     {
+-		valslen= valuearray_count(*vals);
+-		maxvals= valslen+1;
++        valslen= valuearray_count(*vals);
++        maxvals= valslen+1;
+     }
+-	valuearray_add_valuearray_fast(vals,addvals,valslen,addvalslen,&maxvals,1/*Exact*/,flags & SLAPI_VALUE_FLAG_PASSIN);
++    valuearray_add_valuearray_fast(vals,addvals,valslen,addvalslen,&maxvals,1/*Exact*/,flags & SLAPI_VALUE_FLAG_PASSIN);
+ }
+ 
+ int
+diff --git a/lib/libaccess/oneeval.cpp b/lib/libaccess/oneeval.cpp
+index eff4e10..a6d3bbd 100644
+--- a/lib/libaccess/oneeval.cpp
++++ b/lib/libaccess/oneeval.cpp
+@@ -381,20 +381,19 @@ ACLEvalBuildContext(
+     /* 	  Loop through all the ACLs in the list    */
+     while (wrapper)        
+     {
+-	acl = wrapper->acl;
++        acl = wrapper->acl;
+         ace = acl->expr_list_head;
+ 
+         while (ace)    /* Loop through all the ACEs in this ACL    */
+         {
+-
+             /* allocate a new ace list entry and link it in    to the ordered
+              * list.
+              */
+             new_ace = (ACLAceEntry_t *)PERM_CALLOC(sizeof(ACLAceEntry_t));
+             if (new_ace == (ACLAceEntry_t *)NULL) {
+-		nserrGenerate(errp, ACLERRNOMEM, ACLERR4020, ACL_Program, 1,
+-		XP_GetAdminStr(DBT_EvalBuildContextUnableToAllocAceEntry));
+-		goto error;
++                nserrGenerate(errp, ACLERRNOMEM, ACLERR4020, ACL_Program, 1,
++                XP_GetAdminStr(DBT_EvalBuildContextUnableToAllocAceEntry));
++                goto error;
+             }
+             new_ace->acep    = ace;
+             ace_cnt++;
+@@ -402,7 +401,8 @@ ACLEvalBuildContext(
+             if (cache->acelist == NULL)
+                 cache->acelist = acelast    = new_ace;
+             else {
+-                acelast->next  = new_ace;
++                if(acelast)
++                    acelast->next  = new_ace;
+                 acelast        = new_ace;
+                 new_ace->acep  = ace;
+             }
+-- 
+1.8.1.4
+

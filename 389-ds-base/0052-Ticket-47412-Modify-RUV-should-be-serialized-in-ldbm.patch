@@ -1,0 +1,70 @@
+From b73c70b03a5dcde754ec95307c62c6cf15977cff Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 28 Jun 2013 13:34:54 -0700
+Subject: [PATCH 52/99] Ticket #47412 - Modify RUV should be serialized in
+ ldbm_back_modify/add
+
+Bug Description: Current ldbm_back_modify and _add allow RUV to
+update without respecting other threads in the backend's critical
+area. It gives a chance for 2 threads trying to modify RUV at the
+same time in the 2 different transactions which causes the DB
+deadlocks.
+
+Fix Description: This patch changes the policy for RUV to skip
+the backend serial lock.
+
+https://fedorahosted.org/389/ticket/47412
+
+Reviewed by Rich (Thank you!!)
+(cherry picked from commit bc62f8276924f836613a311a0f133c9b548fad9a)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_add.c    |  2 +-
+ ldap/servers/slapd/back-ldbm/ldbm_modify.c | 12 +++++++++---
+ 2 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_add.c b/ldap/servers/slapd/back-ldbm/ldbm_add.c
+index 158dc8e..78ca565 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_add.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_add.c
+@@ -159,7 +159,7 @@ ldbm_back_add( Slapi_PBlock *pb )
+ 	 * operations that the URP code in the Replication
+ 	 * plugin generates.
+ 	 */
+-	if(SERIALLOCK(li) && !is_fixup_operation)
++	if(SERIALLOCK(li) && (!is_fixup_operation || is_ruv))
+ 	{
+ 		dblayer_lock_backend(be);
+ 		dblock_acquired= 1;
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_modify.c b/ldap/servers/slapd/back-ldbm/ldbm_modify.c
+index 5c9585f..66b8ab8 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_modify.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_modify.c
+@@ -394,7 +394,7 @@ ldbm_back_modify( Slapi_PBlock *pb )
+ 	 * operations that the URP code in the Replication
+ 	 * plugin generates.
+ 	 */
+-	if(SERIALLOCK(li) && !operation_is_flag_set(operation,OP_FLAG_REPL_FIXUP)) {
++	if(SERIALLOCK(li) && (!is_fixup_operation || is_ruv)) {
+ 		dblayer_lock_backend(be);
+ 		dblock_acquired= 1;
+ 	}
+@@ -405,8 +405,14 @@ ldbm_back_modify( Slapi_PBlock *pb )
+ 		goto error_return;	  /* error result sent by find_entry2modify() */
+ 	}
+ 
+-	if ( !is_fixup_operation )
+-	{
++	if (!is_fixup_operation) {
++		if (slapi_entry_flag_is_set(e->ep_entry, SLAPI_ENTRY_FLAG_TOMBSTONE)) {
++			ldap_result_code = LDAP_UNWILLING_TO_PERFORM;
++			ldap_result_message = "Operation not allowed on tombstone entry.";
++			slapi_log_error(SLAPI_LOG_FATAL, "ldbm_back_modify",
++			    "Attempt to modify a tombstone entry %s\n", slapi_sdn_get_dn(slapi_entry_get_sdn_const( e->ep_entry )));
++			goto error_return;
++		}
+ 		opcsn = operation_get_csn (operation);
+ 		if (NULL == opcsn && operation->o_csngen_handler)
+ 		{
+-- 
+1.8.1.4
+

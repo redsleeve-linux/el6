@@ -1,0 +1,25 @@
+From ffeb01b10a70fde4bbf6899f900da1b257fa9846 Mon Sep 17 00:00:00 2001
+From: Thierry Bordaz <tbordaz@redhat.com>
+Date: Fri, 18 Sep 2015 18:38:19 +0200
+Subject: [PATCH 339/342] Ticket 48266: coverity issue
+
+(cherry picked from commit 8d4e08a270b4f5e3ffb3ad85e98a7283dfc7e4b7)
+---
+ ldap/servers/plugins/replication/repl5_inc_protocol.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/ldap/servers/plugins/replication/repl5_inc_protocol.c b/ldap/servers/plugins/replication/repl5_inc_protocol.c
+index 0dc9f30..3268bfd 100644
+--- a/ldap/servers/plugins/replication/repl5_inc_protocol.c
++++ b/ldap/servers/plugins/replication/repl5_inc_protocol.c
+@@ -1688,7 +1688,6 @@ send_updates(Private_Repl_Protocol *prp, RUV *remote_update_vector, PRUint32 *nu
+ 		int finished = 0;
+ 		ConnResult replay_crc;
+ 		char csn_str[CSN_STRSIZE];
+-		PRBool subentry_update_sent = PR_FALSE;
+ 		PRBool subentry_update_needed = PR_FALSE;
+ 		int skipped_updates = 0;
+ 		int fractional_repl;
+-- 
+1.9.3
+

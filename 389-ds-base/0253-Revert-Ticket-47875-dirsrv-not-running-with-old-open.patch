@@ -1,0 +1,26 @@
+From 3591a0a14bd19e31b438cc4fe1c6c6021e24942a Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Wed, 20 Aug 2014 15:32:21 -0700
+Subject: [PATCH 253/255] Revert "Ticket #47875 - dirsrv not running with old
+ openldap"
+
+This reverts commit 0f0951dece5a82361aa15ee1d0271890f3026052.
+---
+ configure.ac | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index b52fbcc..df02cff 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -653,7 +653,6 @@ AC_SUBST(openldap_inc)
+ AC_SUBST(openldap_lib)
+ AC_SUBST(openldap_libdir)
+ AC_SUBST(openldap_bindir)
+-AC_SUBST(ldap_lib_ldif)
+ AC_SUBST(ldaptool_bindir)
+ AC_SUBST(ldaptool_opts)
+ AC_SUBST(plainldif_opts)
+-- 
+1.8.1.4
+

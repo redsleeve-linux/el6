@@ -1,0 +1,40 @@
+From 4062dd1bd7c34b04208a51181af5573b4e257f9d Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Thu, 28 Mar 2013 11:08:18 -0700
+Subject: [PATCH 42/42] Ticket #47308 - unintended information exposure when
+ anonymous access is set to rootdse
+
+Bug description: The actual search base was not being checked
+at all.  There was a check for the search base when this feature
+was initially implemented, but it was inadvertently removed when
+changes were made to reduce the DN normalization throughout the
+source tree (commit f6397113666f06848412bb12f754f04258cfa5fa).
+
+Fix description: This patch adds the search base check back.
+
+Note: CVE-2013-1897
+
+https://fedorahosted.org/389/ticket/47308
+
+Reviewed by Rich, Noriko and Mark.
+(cherry picked from commit 4b2d700b77c1d4a0a2ad6592e2296068a200cbdd)
+---
+ ldap/servers/slapd/search.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/search.c b/ldap/servers/slapd/search.c
+index c3d51d6..7719727 100644
+--- a/ldap/servers/slapd/search.c
++++ b/ldap/servers/slapd/search.c
+@@ -141,7 +141,7 @@ do_search( Slapi_PBlock *pb )
+ 	/* If anonymous access is only allowed for searching the root DSE,
+ 	 * we need to reject any other anonymous search attempts. */
+ 	if ((slapi_sdn_get_dn(&(operation->o_sdn)) == NULL) &&
+-	    (scope != LDAP_SCOPE_BASE) &&
++	    ((rawbase && strlen(rawbase) > 0) || (scope != LDAP_SCOPE_BASE)) &&
+ 	    (config_get_anon_access_switch() == SLAPD_ANON_ACCESS_ROOTDSE)) {
+ 		op_shared_log_error_access(pb, "SRCH", rawbase?rawbase:"",
+ 		                           "anonymous search not allowed");
+-- 
+1.8.1.4
+

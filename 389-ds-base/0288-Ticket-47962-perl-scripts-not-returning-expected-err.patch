@@ -1,0 +1,226 @@
+From 55fb56e85b6ba73fe35398a53ed140c486ade500 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Wed, 17 Dec 2014 11:56:42 -0500
+Subject: [PATCH 288/305] Ticket 47962 - perl scripts not returning expected
+ error code
+
+Bug Description:  WHne one o the instance perl scripts fails, it either
+                  returns sucess, or the wrong the error code.
+
+Fix Description:  The perl scripts need to bit shift the result code by 8,
+                  and return the result.
+
+https://fedorahosted.org/389/ticket/47962
+
+Reviewed by: rmeggins(Thanks!)
+
+(cherry picked from commit d8e79122c33e619f0950503a3a3b9a4b38f20e54)
+---
+ ldap/admin/src/scripts/template-bak2db.pl.in                |  2 ++
+ ldap/admin/src/scripts/template-cleanallruv.pl.in           |  2 ++
+ ldap/admin/src/scripts/template-db2bak.pl.in                |  2 ++
+ ldap/admin/src/scripts/template-db2index.pl.in              |  2 ++
+ ldap/admin/src/scripts/template-db2ldif.pl.in               |  2 ++
+ ldap/admin/src/scripts/template-fixup-linkedattrs.pl.in     |  2 ++
+ ldap/admin/src/scripts/template-fixup-memberof.pl.in        |  2 ++
+ ldap/admin/src/scripts/template-ldif2db.pl.in               |  2 ++
+ ldap/admin/src/scripts/template-ns-newpwpolicy.pl.in        | 13 +++++++------
+ ldap/admin/src/scripts/template-schema-reload.pl.in         |  2 ++
+ ldap/admin/src/scripts/template-syntax-validate.pl.in       |  2 ++
+ ldap/admin/src/scripts/template-usn-tombstone-cleanup.pl.in |  2 ++
+ 12 files changed, 29 insertions(+), 6 deletions(-)
+
+diff --git a/ldap/admin/src/scripts/template-bak2db.pl.in b/ldap/admin/src/scripts/template-bak2db.pl.in
+index 4ab79cc..2f243ba 100644
+--- a/ldap/admin/src/scripts/template-bak2db.pl.in
++++ b/ldap/admin/src/scripts/template-bak2db.pl.in
+@@ -135,6 +135,8 @@ $ENV{'SHLIB_PATH'} = "$ENV{'LD_LIBRARY_PATH'}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-cleanallruv.pl.in b/ldap/admin/src/scripts/template-cleanallruv.pl.in
+index be95a6d..437a3c0 100644
+--- a/ldap/admin/src/scripts/template-cleanallruv.pl.in
++++ b/ldap/admin/src/scripts/template-cleanallruv.pl.in
+@@ -171,6 +171,8 @@ $entry = "${dn}${misc}${cn}${basedn}${rid}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-db2bak.pl.in b/ldap/admin/src/scripts/template-db2bak.pl.in
+index 8a0cb1c..329664f 100644
+--- a/ldap/admin/src/scripts/template-db2bak.pl.in
++++ b/ldap/admin/src/scripts/template-db2bak.pl.in
+@@ -125,6 +125,8 @@ print("Back up directory: $archivedir\n");
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-db2index.pl.in b/ldap/admin/src/scripts/template-db2index.pl.in
+index e598b05..39454c5 100644
+--- a/ldap/admin/src/scripts/template-db2index.pl.in
++++ b/ldap/admin/src/scripts/template-db2index.pl.in
+@@ -229,6 +229,8 @@ $entry = "${dn}${misc}${cn}${nsinstance}${attribute}${vlvattribute}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-db2ldif.pl.in b/ldap/admin/src/scripts/template-db2ldif.pl.in
+index a4929ba..febedd4 100644
+--- a/ldap/admin/src/scripts/template-db2ldif.pl.in
++++ b/ldap/admin/src/scripts/template-db2ldif.pl.in
+@@ -269,6 +269,8 @@ print("Exporting to ldif file: ${ldiffile}\n");
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-fixup-linkedattrs.pl.in b/ldap/admin/src/scripts/template-fixup-linkedattrs.pl.in
+index f181a7a..67f0b31 100644
+--- a/ldap/admin/src/scripts/template-fixup-linkedattrs.pl.in
++++ b/ldap/admin/src/scripts/template-fixup-linkedattrs.pl.in
+@@ -155,6 +155,8 @@ $entry = "${dn}${misc}${cn}${basedn}${linkdn}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-fixup-memberof.pl.in b/ldap/admin/src/scripts/template-fixup-memberof.pl.in
+index b43c21a..77a1528 100644
+--- a/ldap/admin/src/scripts/template-fixup-memberof.pl.in
++++ b/ldap/admin/src/scripts/template-fixup-memberof.pl.in
+@@ -166,6 +166,8 @@ $entry = "${dn}${misc}${cn}${basedn}${filter}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-ldif2db.pl.in b/ldap/admin/src/scripts/template-ldif2db.pl.in
+index 089c95d..1cf83b4 100644
+--- a/ldap/admin/src/scripts/template-ldif2db.pl.in
++++ b/ldap/admin/src/scripts/template-ldif2db.pl.in
+@@ -227,6 +227,8 @@ $ENV{'SHLIB_PATH'} = "$ENV{'LD_LIBRARY_PATH'}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-ns-newpwpolicy.pl.in b/ldap/admin/src/scripts/template-ns-newpwpolicy.pl.in
+index 50ce047..bd9b238 100755
+--- a/ldap/admin/src/scripts/template-ns-newpwpolicy.pl.in
++++ b/ldap/admin/src/scripts/template-ns-newpwpolicy.pl.in
+@@ -186,9 +186,9 @@ sub usage {
+ 		open(FD,"| $modifyCfg ");
+ 		print(FD $modConfig);
+ 		close(FD);
+-		$retcode = $?;
++		$retcode = $?>>8;
+ 		if ( $retcode != 0 ) {
+-			print( STDERR "Error $retcode while modifing \"cn=config\". Exiting.\n" );
++			print( STDERR "Error $retcode while modifying \"cn=config\". Exiting.\n" );
+ 			exit ($retcode);
+ 		}
+ 		else {
+@@ -203,6 +203,7 @@ sub usage {
+ 		$esc_opt_U =~ s/=/\\=/g;
+ 		print (STDERR "host = $opt_h, port = $opt_p, userDN = \"$norm_opt_U\"\n\n") if $opt_v;
+ 		$retcode = `$ldapsearch -h $opt_h -p $opt_p -b \"$norm_opt_U\" -s base \"\"`;
++		$retcode = $retcode>>8;
+ 		if ($retcode != 0 ) {
+ 			print( STDERR "the user entry $norm_opt_U does not exist. Exiting.\n");
+ 			exit ($retcode);
+@@ -267,9 +268,9 @@ sub usage {
+ 		open(FD,"| $modifyCfg ");
+ 		print(FD $modConfig);
+ 		close(FD);
+-		$retcode = $?;
++		$retcode = $?>>8;
+ 		if ( $retcode != 0 ) {
+-			print( STDERR "Error $retcode while modifing $norm_opt_U. Exiting.\n" );
++			print( STDERR "Error $retcode while modifying $norm_opt_U. Exiting.\n" );
+ 			exit ($retcode);
+ 		}
+ 		else {
+@@ -280,9 +281,9 @@ sub usage {
+ 		open(FD,"| $modifyCfg ");
+ 		print(FD $modConfig);
+ 		close(FD);
+-		$retcode = $?;
++		$retcode = $?>>8;
+ 		if ( $retcode != 0 ) {
+-			print( STDERR "Error $retcode while modifing \"cn=config\". Exiting.\n" );
++			print( STDERR "Error $retcode while modifying \"cn=config\". Exiting.\n" );
+ 			exit ($retcode);
+ 		}
+ 		else {
+diff --git a/ldap/admin/src/scripts/template-schema-reload.pl.in b/ldap/admin/src/scripts/template-schema-reload.pl.in
+index f7a1dbb..6b64b5e 100644
+--- a/ldap/admin/src/scripts/template-schema-reload.pl.in
++++ b/ldap/admin/src/scripts/template-schema-reload.pl.in
+@@ -155,6 +155,8 @@ $entry = "${dn}${misc}${cn}${basedn}${schemadir}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-syntax-validate.pl.in b/ldap/admin/src/scripts/template-syntax-validate.pl.in
+index b87e12d..b40ef69 100644
+--- a/ldap/admin/src/scripts/template-syntax-validate.pl.in
++++ b/ldap/admin/src/scripts/template-syntax-validate.pl.in
+@@ -166,6 +166,8 @@ $entry = "${dn}${misc}${cn}${basedn}${filter}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+diff --git a/ldap/admin/src/scripts/template-usn-tombstone-cleanup.pl.in b/ldap/admin/src/scripts/template-usn-tombstone-cleanup.pl.in
+index 3e17be0..92c106d 100644
+--- a/ldap/admin/src/scripts/template-usn-tombstone-cleanup.pl.in
++++ b/ldap/admin/src/scripts/template-usn-tombstone-cleanup.pl.in
+@@ -183,6 +183,8 @@ $entry = "${dn}${misc}${cn}${basedn}${args}";
+ open(FOO, "| ldapmodify @ldaptool_opts@ $vstr -h {{SERVER-NAME}} -p {{SERVER-PORT}} -D \"$rootdn\" -w \"$passwd\" -a" );
+ print(FOO "$entry");
+ close(FOO);
++$retcode = $?>>8;
++exit ($retcode);
+ 
+ sub libpath_add {
+     my $libpath = shift;
+-- 
+1.9.3
+

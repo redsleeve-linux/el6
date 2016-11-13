@@ -1,0 +1,27 @@
+From d622ff81fc59cd0694e0b964d21c384469d5fd8e Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Thu, 19 Feb 2015 10:22:02 -0800
+Subject: [PATCH] Coverity fix - Invalid Dereference in ndn_cache_add (dn.c)
+
+(cherry picked from commit d132bc4014dc5bd5f69f403ca415de0007713b61)
+---
+ ldap/servers/slapd/dn.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/dn.c b/ldap/servers/slapd/dn.c
+index 9c1084f..db050c8 100644
+--- a/ldap/servers/slapd/dn.c
++++ b/ldap/servers/slapd/dn.c
+@@ -2936,7 +2936,8 @@ ndn_cache_add(char *dn, size_t dn_len, char *ndn, size_t ndn_len)
+         new_node->next = NULL;
+     } else {
+         new_node->next = ndn_cache->head;
+-        ndn_cache->head->prev = new_node;
++        if(ndn_cache->head)
++            ndn_cache->head->prev = new_node;
+     }
+     ndn_cache->head = new_node;
+     PR_Unlock(lru_lock);
+-- 
+1.9.3
+

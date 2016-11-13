@@ -1,0 +1,59 @@
+From 19cbec20e42dff5ec42ac32f0dc0108416796a9c Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 8 Dec 2015 12:30:15 -0800
+Subject: [PATCH 368/368] Ticket #48305 - perl module conditional test is not
+ conditional when checking SELinux policies
+
+Description: commit 9fefc13c02c9ae037fad053152193794706aaa31 introduced
+a regression:
+  Bug 1287547 - 389-ds-base-1.3.4.5-1.fc23.x86_64 leaves empty /NUL around
+                after ipa-server-install
+
+To check the existence of a character special file "/dev/null", "-c" is
+supposed to be used instead of "-f".
+
+Reviewed by mreynolds@redhat.com (Thank you, Mark!!)
+
+https://fedorahosted.org/389/ticket/48305
+(cherry picked from commit c4233ec14a82d1d4c0c71915be40913259d417fa)
+(cherry picked from commit 48308f34269ed37712f21b59665f5df5e42b9fd9)
+(cherry picked from commit aab7eda643fe4adae7c180e8cf750c06c696f8b6)
+(cherry picked from commit aa596775228be085f92e69a8d928f5692b47857f)
+---
+ ldap/admin/src/scripts/DSCreate.pm.in | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/admin/src/scripts/DSCreate.pm.in b/ldap/admin/src/scripts/DSCreate.pm.in
+index 76d2e88..b7f9498 100644
+--- a/ldap/admin/src/scripts/DSCreate.pm.in
++++ b/ldap/admin/src/scripts/DSCreate.pm.in
+@@ -285,7 +285,7 @@ sub createInstanceScripts {
+     my $skip = shift;
+     my $perlexec = "@perlexec@" || "/usr/bin/env perl";
+     my $myperl = "!$perlexec";
+-    my $mydevnull = (-f "/dev/null" ? " /dev/null " : " NUL ");
++    my $mydevnull = (-c "/dev/null" ? " /dev/null " : " NUL ");
+ 
+     # determine initconfig_dir
+     my $initconfig_dir = $inf->{slapd}->{initconfig_dir} || get_initconfigdir();
+@@ -969,7 +969,7 @@ sub setDefaults {
+ 
+ sub updateSelinuxPolicy {
+     my $inf = shift;
+-    my $mydevnull = (-f "/dev/null" ? " /dev/null " : " NUL ");
++    my $mydevnull = (-c "/dev/null" ? " /dev/null " : " NUL ");
+ 
+     # if selinux is not available, do nothing
+     if ("@with_selinux@" and
+@@ -1377,7 +1377,7 @@ sub removeDSInstance {
+     }
+ 
+     # remove the selinux label from the ports if needed
+-    my $mydevnull = (-f "/dev/null" ? " /dev/null " : " NUL ");
++    my $mydevnull = (-c "/dev/null" ? " /dev/null " : " NUL ");
+     if ("@with_selinux@" and
+         -f "@sbindir@/sestatus" and !system ("@sbindir@/sestatus | egrep -i \"selinux status:\\s*enabled\" > $mydevnull 2>&1")) {
+         foreach my $port (@{$entry->{"nsslapd-port"}}) 
+-- 
+2.4.3
+

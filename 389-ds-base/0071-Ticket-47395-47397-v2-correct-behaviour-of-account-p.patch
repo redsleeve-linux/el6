@@ -1,0 +1,169 @@
+From 93ec3fe4e4ec04994bc471a8190978076b6b2954 Mon Sep 17 00:00:00 2001
+From: Ludwig Krispenz <lkrispen@redhat.com>
+Date: Thu, 20 Jun 2013 17:59:09 +0200
+Subject: [PATCH 71/99] Ticket 47395 47397 v2 correct behaviour of account
+ policy if only stateattr 	is configured or no alternate attr is
+ configured
+
+Bug Description:  The tickets relate to two specific configurations of
+	the account policy plugin
+	1] if createtimestamp is configured as stateattr it is treated like a
+	   normal timstamp attribute and is updated, which should not happen.
+	   As a side effect the account is not locked out based on the original
+	   createtimestamp
+	2] if no altstateattr is configured, always createtimestamp is used, but
+	   the intention was to base account inactivation only on lastlogintime
+
+Fix Description:   1] prevent update of createtimestamp, even if used as stateattr
+		   2] if no altstateattr is configured still use the default, but
+		      accept "1.1" as null value and check only stateattr
+
+https://fedorahosted.org/389/ticket/47395
+https://fedorahosted.org/389/ticket/47397
+
+Reviewed by: ?
+(cherry picked from commit b4cc0f6b31d8221677950a703a78b02e0cbc7e30)
+---
+ ldap/servers/plugins/acctpolicy/acct_config.c | 13 ++++++++++++-
+ ldap/servers/plugins/acctpolicy/acct_init.c   |  2 +-
+ ldap/servers/plugins/acctpolicy/acct_plugin.c | 18 +++++++++++++-----
+ ldap/servers/plugins/acctpolicy/acct_util.c   | 13 +++++++++++++
+ ldap/servers/plugins/acctpolicy/acctpolicy.h  |  5 +++++
+ 5 files changed, 44 insertions(+), 7 deletions(-)
+
+diff --git a/ldap/servers/plugins/acctpolicy/acct_config.c b/ldap/servers/plugins/acctpolicy/acct_config.c
+index 3da338a..8dfde0b 100644
+--- a/ldap/servers/plugins/acctpolicy/acct_config.c
++++ b/ldap/servers/plugins/acctpolicy/acct_config.c
+@@ -82,12 +82,23 @@ acct_policy_entry2config( Slapi_Entry *e, acctPluginCfg *newcfg ) {
+ 	newcfg->state_attr_name = get_attr_string_val( e, CFG_LASTLOGIN_STATE_ATTR );
+ 	if( newcfg->state_attr_name == NULL ) {
+ 		newcfg->state_attr_name = slapi_ch_strdup( DEFAULT_LASTLOGIN_STATE_ATTR );
++	} else if (!update_is_allowed_attr(newcfg->state_attr_name)) {
++		/* log a warning that this attribute cannot be updated */
++		slapi_log_error( SLAPI_LOG_FATAL, PLUGIN_NAME,
++							 "The configured state attribute [%s] cannot be updated, accounts will always become inactive.\n",
++							 newcfg->state_attr_name );
+ 	}
+ 
+ 	newcfg->alt_state_attr_name = get_attr_string_val( e, CFG_ALT_LASTLOGIN_STATE_ATTR );
++	/* alt_state_attr_name should be optional, but for backward compatibility, 
++	 * if not specified use a default. If the attribute is "1.1", no fallback 
++	 * will be used
++	 */ 
+ 	if( newcfg->alt_state_attr_name == NULL ) {
+ 		newcfg->alt_state_attr_name = slapi_ch_strdup( DEFAULT_ALT_LASTLOGIN_STATE_ATTR );
+-	}
++	} else if ( !strcmp( newcfg->alt_state_attr_name, "1.1" ) ) {
++                 slapi_ch_free_string( &newcfg->alt_state_attr_name ); /*none - NULL */
++	} /* else use configured value */
+ 
+ 	newcfg->spec_attr_name = get_attr_string_val( e, CFG_SPEC_ATTR );
+ 	if( newcfg->spec_attr_name == NULL ) {
+diff --git a/ldap/servers/plugins/acctpolicy/acct_init.c b/ldap/servers/plugins/acctpolicy/acct_init.c
+index af29140..52e0cfa 100644
+--- a/ldap/servers/plugins/acctpolicy/acct_init.c
++++ b/ldap/servers/plugins/acctpolicy/acct_init.c
+@@ -132,7 +132,7 @@ acct_policy_start( Slapi_PBlock *pb ) {
+ 	slapi_log_error( SLAPI_LOG_PLUGIN, PLUGIN_NAME, "acct_policy_start config: "
+ 		"stateAttrName=%s altStateAttrName=%s specAttrName=%s limitAttrName=%s "
+ 		"alwaysRecordLogin=%d\n",
+-		cfg->state_attr_name, cfg->alt_state_attr_name, cfg->spec_attr_name,
++		cfg->state_attr_name, cfg->alt_state_attr_name?cfg->alt_state_attr_name:"not configured", cfg->spec_attr_name,
+ 		cfg->limit_attr_name, cfg->always_record_login);
+ 	return( CALLBACK_OK );
+ }
+diff --git a/ldap/servers/plugins/acctpolicy/acct_plugin.c b/ldap/servers/plugins/acctpolicy/acct_plugin.c
+index 508fb23..b4db811 100644
+--- a/ldap/servers/plugins/acctpolicy/acct_plugin.c
++++ b/ldap/servers/plugins/acctpolicy/acct_plugin.c
+@@ -44,14 +44,16 @@ acct_inact_limit( Slapi_PBlock *pb, const char *dn, Slapi_Entry *target_entry, a
+ 		cfg->state_attr_name ) ) != NULL ) {
+ 		slapi_log_error( SLAPI_LOG_PLUGIN, PRE_PLUGIN_NAME,
+ 			"\"%s\" login timestamp is %s\n", dn, lasttimestr );
+-	} else if( ( lasttimestr = get_attr_string_val( target_entry,
+-		cfg->alt_state_attr_name ) ) != NULL ) {
++	} else if( cfg->alt_state_attr_name && (( lasttimestr = get_attr_string_val( target_entry,
++		cfg->alt_state_attr_name ) ) != NULL) ) {
+ 		slapi_log_error( SLAPI_LOG_PLUGIN, PRE_PLUGIN_NAME,
+ 			"\"%s\" alternate timestamp is %s\n", dn, lasttimestr );
+ 	} else {
++		/* the primary or alternate attribute might not yet exist eg. 
++		 * if only lastlogintime is specified and it id the first login
++		 */
+ 		slapi_log_error( SLAPI_LOG_PLUGIN, PRE_PLUGIN_NAME,
+-			"\"%s\" has no login or creation timestamp\n", dn );
+-		rc = -1;
++			"\"%s\" has no value for stateattr or altstateattr \n", dn );
+ 		goto done;
+ 	}
+ 
+@@ -105,6 +107,13 @@ acct_record_login( const char *dn )
+ 	int skip_mod_attrs = 1; /* value doesn't matter as long as not NULL */
+ 
+ 	cfg = get_config();
++
++	/* if we are not allowed to modify the state attr we're done
++         * this could be intentional, so just return
++         */
++	if (! update_is_allowed_attr(cfg->state_attr_name) )
++		return rc;
++ 
+ 	plugin_id = get_identity();
+ 
+ 	timestr = epochtimeToGentime( time( (time_t*)0 ) );
+@@ -283,7 +292,6 @@ acct_bind_postop( Slapi_PBlock *pb )
+ 		} else {
+ 			if( target_entry && has_attr( target_entry,
+ 				cfg->spec_attr_name, NULL ) ) {
+-				/* This account has a policy specifier */
+ 				tracklogin = 1;
+ 			}
+ 		}
+diff --git a/ldap/servers/plugins/acctpolicy/acct_util.c b/ldap/servers/plugins/acctpolicy/acct_util.c
+index 8e220c3..a02382f 100644
+--- a/ldap/servers/plugins/acctpolicy/acct_util.c
++++ b/ldap/servers/plugins/acctpolicy/acct_util.c
+@@ -255,3 +255,16 @@ epochtimeToGentime( time_t epochtime ) {
+ 	return( gentimestr );
+ }
+ 
++int update_is_allowed_attr (const char *attr)
++{
++	int i;
++
++        /* check list of attributes that cannot be used for login recording */
++        for (i = 0; protected_attrs_login_recording[i]; i ++) {
++            if (strcasecmp (attr, protected_attrs_login_recording[i]) == 0) {
++                /* this attribute is not allowed */
++                return 0;
++            }
++        }
++	return 1;
++}
+diff --git a/ldap/servers/plugins/acctpolicy/acctpolicy.h b/ldap/servers/plugins/acctpolicy/acctpolicy.h
+index e6f1497..78412cd 100644
+--- a/ldap/servers/plugins/acctpolicy/acctpolicy.h
++++ b/ldap/servers/plugins/acctpolicy/acctpolicy.h
+@@ -35,6 +35,10 @@ Hewlett-Packard Development Company, L.P.
+ #define DEFAULT_INACT_LIMIT_ATTR "accountInactivityLimit"
+ #define DEFAULT_RECORD_LOGIN 1
+ 
++/* attributes that no clients are allowed to add or modify */
++static char *protected_attrs_login_recording [] = { "createTimestamp",
++                                        NULL };
++
+ #define PLUGIN_VENDOR "Hewlett-Packard Company"
+ #define PLUGIN_VERSION "1.0"
+ #define PLUGIN_CONFIG_DN "cn=config,cn=Account Policy Plugin,cn=plugins,cn=config"
+@@ -74,6 +78,7 @@ void* get_identity();
+ void set_identity(void*);
+ time_t gentimeToEpochtime( char *gentimestr );
+ char* epochtimeToGentime( time_t epochtime ); 
++int update_is_allowed_attr (const char *attr);
+ 
+ /* acct_config.c */
+ int acct_policy_load_config_startup( Slapi_PBlock* pb, void* plugin_id );
+-- 
+1.8.1.4
+

@@ -1,0 +1,71 @@
+From f47fa41572268029d369d410c9bc6d0a831ba50a Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Thu, 8 May 2014 15:10:52 -0400
+Subject: [PATCH 206/225] Ticket 47793 - Server crashes if uniqueMember is
+ invalid syntax and memberOf                plugin is enabled.
+
+Bug Description:  MemberOf assumes the DN value has the correct syntax, and
+                  does not check the normalized value of that DN.  This
+                  leads to dereferencing a NULL pointer and crash.
+
+Fix Description:  Check the normalized value, and log a proper error.
+
+https://fedorahosted.org/389/ticket/47793
+
+Reviewed by: nhosoi(Thanks!)
+
+(cherry picked from commit 6816e1155b28fb65fe294099336c4acbbac8ad77)
+(cherry picked from commit 5f14af25186ea3c68fafecf034a0563da6fca187)
+---
+ ldap/servers/plugins/memberof/memberof.c | 32 ++++++++++++++++++++++++--------
+ 1 file changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/ldap/servers/plugins/memberof/memberof.c b/ldap/servers/plugins/memberof/memberof.c
+index 49e0d7a..19fb8a5 100644
+--- a/ldap/servers/plugins/memberof/memberof.c
++++ b/ldap/servers/plugins/memberof/memberof.c
+@@ -1101,17 +1101,33 @@ memberof_modop_one_replace_r(Slapi_PBlock *pb, MemberOfConfig *config,
+ 	Slapi_Entry *e = 0; 
+ 	memberofstringll *ll = 0;
+ 	char *op_str = 0;
+-	const char *op_to = slapi_sdn_get_ndn(op_to_sdn);
+-	const char *op_this = slapi_sdn_get_ndn(op_this_sdn);
+-	Slapi_Value *to_dn_val = slapi_value_new_string(op_to);
+-	Slapi_Value *this_dn_val = slapi_value_new_string(op_this);
+-
+-	if(this_dn_val == NULL || to_dn_val == NULL){
++	const char *op_to;
++	const char *op_this;
++	Slapi_Value *to_dn_val = NULL;
++	Slapi_Value *this_dn_val = NULL;
++
++	op_to = slapi_sdn_get_ndn(op_to_sdn);
++	op_this = slapi_sdn_get_ndn(op_this_sdn);
++
++	/* Make sure we have valid DN's for the group(op_this) and the new member(op_to) */
++	if(op_to && op_this){
++		to_dn_val = slapi_value_new_string(op_to);
++		this_dn_val = slapi_value_new_string(op_this);
++	}
++	if(to_dn_val == NULL){
++		const char *udn = op_to_sdn ? slapi_sdn_get_udn(op_to_sdn) : "";
+ 		slapi_log_error( SLAPI_LOG_FATAL, MEMBEROF_PLUGIN_SUBSYSTEM,
+-				"memberof_modop_one_replace_r: failed to get DN values (NULL)\n");
++			"memberof_modop_one_replace_r: failed to get DN value from "
++			"member value (%s)\n", udn);
++		goto bail;
++	}
++	if(this_dn_val == NULL){
++		const char *udn = op_this_sdn ? slapi_sdn_get_udn(op_this_sdn) : "";
++		slapi_log_error( SLAPI_LOG_FATAL, MEMBEROF_PLUGIN_SUBSYSTEM,
++			"memberof_modop_one_replace_r: failed to get DN value from "
++			"group (%s)\n", udn);
+ 		goto bail;
+ 	}
+-
+ 	/* op_this and op_to are both case-normalized */
+ 	slapi_value_set_flags(this_dn_val, SLAPI_ATTR_FLAG_NORMALIZED_CIS);
+ 	slapi_value_set_flags(to_dn_val, SLAPI_ATTR_FLAG_NORMALIZED_CIS);
+-- 
+1.8.1.4
+

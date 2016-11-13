@@ -1,0 +1,60 @@
+From 3b3b1c2601ba35ce51b5e5cf8b4002eaa45c1611 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Fri, 14 Mar 2014 12:33:40 -0400
+Subject: [PATCH 188/225] Ticket 47740 - Crash caused by changes to certmap.c
+
+Bug Description: dncomps & filtercomps could be incorrectly freed,
+                 which lead to a crash.
+
+Fix Description: Allocate "" for dncomps & filtercomps, instead of
+                 setting it on the stack.
+
+https://fedorahosted.org/389/ticket/47740
+
+Reviewed by: rmeggins(Thanks!)
+(cherry picked from commit 33b98f1c901f1441dd1f709e244735fa339a287e)
+(cherry picked from commit b46e1fddeea9c13537d975e5807f84c4359590ce)
+---
+ lib/ldaputil/certmap.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/lib/ldaputil/certmap.c b/lib/ldaputil/certmap.c
+index aa5bafa..0935e4d 100644
+--- a/lib/ldaputil/certmap.c
++++ b/lib/ldaputil/certmap.c
+@@ -524,7 +524,7 @@ static int process_certinfo (LDAPUCertMapInfo_t *certinfo)
+     }
+     else if (rv == LDAPU_SUCCESS && !dncomps) {
+         certinfo->dncompsState = COMPS_EMPTY;
+-        dncomps = "";		/* present but empty */
++        dncomps = strdup("");		/* present but empty */
+     }
+ 
+     rv = parse_into_bitmask (dncomps, &certinfo->dncomps, -1);
+@@ -547,12 +547,12 @@ static int process_certinfo (LDAPUCertMapInfo_t *certinfo)
+     }
+     else if (rv == LDAPU_SUCCESS && !filtercomps) {
+         certinfo->filtercompsState = COMPS_EMPTY;
+-        filtercomps = "";	/* present but empty */
++        filtercomps = strdup("");	/* present but empty */
+     }
+ 
+     rv = parse_into_bitmask (filtercomps, &certinfo->filtercomps, 0);
+ 
+-    if (filtercomps) free(filtercomps);
++    free(filtercomps); filtercomps = NULL;
+     
+     if (rv != LDAPU_SUCCESS) return rv;
+ 
+@@ -590,7 +590,7 @@ static int process_certinfo (LDAPUCertMapInfo_t *certinfo)
+     else if (rv == LDAPU_FAILED)  rv = LDAPU_SUCCESS;
+ 
+     if (verify) free(verify);
+-    
++
+     if (rv != LDAPU_SUCCESS) return rv;
+ 
+     {
+-- 
+1.8.1.4
+

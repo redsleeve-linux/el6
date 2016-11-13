@@ -1,0 +1,230 @@
+From 0b48e0728af1fb7c59468cb93f9805cb8fbcac03 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 28 Jan 2014 11:25:34 -0800
+Subject: [PATCH 159/225] Ticket #47463 - IDL-style can become mismatched
+ during partial restoration
+
+The commit to 389-ds-base-1.3.2 and newer is back ported to 389-ds-
+1.2.11 trough 1.3.1 by Thomas E Lackey.
+
+commit b43145218dccc8c9c16ecadad80f94bf58c73d57
+Author: Noriko Hosoi <nhosoi@redhat.com>
+Date:   Fri Sep 27 17:58:03 2013 -0700
+
+Description by telackey:
+When doing a partial/FRI restoration the database files are copied
+key-by-key. This is necessary to reset the LSNs so the restored
+files can merge into the existing DB environment (cf. dblayer_copy_
+file_resetlsns()) in a recoverable way.
+
+However, dblayer_copy_file_keybykey() does not set the comparison
+function before calling DB->put(), which means that the restored
+files will not necessarily be using the proper function.
+
+While all the keys are technically present, indexed searches can
+still fail to return relevant results because the key order is
+significant when intersecting the results with the other indices.
+
+Note: The bug was reported and the patch was provided by telackey.
+(Thank you, Thomas!)
+
+Additional fix by nhosoi:
+The entryrdn index uses its special dup compare function.  The dup
+compare function is set when the restoring index file is entryrdn.
+
+https://fedorahosted.org/389/ticket/47463
+
+Reviewed by rmeggins (Thank you, Rich!)
+(cherry picked from commit abe5c894686f46b60f069f8cbd8aa909b34d81a1)
+---
+ ldap/servers/slapd/back-ldbm/dbhelp.c  | 53 ++++++++++++++++++++++++++++++++--
+ ldap/servers/slapd/back-ldbm/dblayer.c | 29 +++++++++----------
+ ldap/servers/slapd/back-ldbm/dblayer.h |  2 +-
+ 3 files changed, 65 insertions(+), 19 deletions(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/dbhelp.c b/ldap/servers/slapd/back-ldbm/dbhelp.c
+index 1165831..b0d17d3 100644
+--- a/ldap/servers/slapd/back-ldbm/dbhelp.c
++++ b/ldap/servers/slapd/back-ldbm/dbhelp.c
+@@ -49,7 +49,13 @@
+ #include "back-ldbm.h"
+ #include "dblayer.h"
+ 
+-static int dblayer_copy_file_keybykey(DB_ENV *env, char *source_file_name, char *destination_file_name, int overwrite, dblayer_private *priv)
++static int
++dblayer_copy_file_keybykey(DB_ENV *env,
++                           char *source_file_name,
++                           char *destination_file_name,
++                           int overwrite,
++                           dblayer_private *priv,
++                           ldbm_instance *inst)
+ {
+ 	int retval = 0;
+ 	int retval_cleanup = 0;
+@@ -62,6 +68,7 @@ static int dblayer_copy_file_keybykey(DB_ENV *env, char *source_file_name, char
+ 	int cursor_flag = 0;
+ 	int finished = 0;
+ 	int mode = 0;
++        char *p = NULL;
+ 
+ 	LDAPDebug( LDAP_DEBUG_TRACE, "=> dblayer_copy_file_keybykey\n", 0, 0, 0 );
+ 
+@@ -119,6 +126,40 @@ static int dblayer_copy_file_keybykey(DB_ENV *env, char *source_file_name, char
+ 		LDAPDebug(LDAP_DEBUG_ANY, "dblayer_copy_file_keybykey, set_pagesize error %d: %s\n", retval, db_strerror(retval), 0);
+ 		goto error;
+ 	}
++
++        /* TEL 20130412: Make sure to set the dup comparison function if needed.  
++         * We key our decision off of the presence of new IDL and dup flags on
++         * the source database.  This is similar dblayer_open_file, except that
++         * we don't have the attribute info index mask for VLV.  That should be OK
++         * since the DB_DUP and DB_DUPSORT flags wouldn't have been toggled on
++         * unless they passed the check on the source.
++         */
++        /* Entryrdn index has its own dup compare function */
++        if ((p = PL_strcasestr(source_file_name, LDBM_ENTRYRDN_STR)) &&
++                (*(p + sizeof(LDBM_ENTRYRDN_STR) - 1) == '.')) {
++                /* entryrdn.db */
++                struct attrinfo *ai = NULL;
++                ainfo_get(inst->inst_be, LDBM_ENTRYRDN_STR, &ai);
++                if (ai->ai_dup_cmp_fn) {
++                        /* If set, use the special dup compare callback */
++                        retval = destination_file->set_dup_compare(destination_file, ai->ai_dup_cmp_fn);
++                        if (retval) {
++                                LDAPDebug2Args(LDAP_DEBUG_ANY,
++                                               "dblayer_copy_file_keybykey(entryrdn), set_dup_compare error %d: %s\n",
++                                               retval, db_strerror(retval));
++                                goto error;
++                        }
++                }
++        } else if (idl_get_idl_new() && (dbflags & DB_DUP) && (dbflags & DB_DUPSORT)) {
++                retval = destination_file->set_dup_compare(destination_file, idl_new_compare_dups); 
++                if (retval) {
++                        LDAPDebug2Args(LDAP_DEBUG_ANY,
++                                       "dblayer_copy_file_keybykey, set_dup_compare error %d: %s\n",
++                                       retval, db_strerror(retval));
++                        goto error;
++                }
++        }
++
+ 	retval = (destination_file->open)(destination_file, NULL, destination_file_name, NULL, dbtype, DB_CREATE | DB_EXCL, mode);
+ 	if (retval) {
+ 		LDAPDebug(LDAP_DEBUG_ANY, "dblayer_copy_file_keybykey, Open error %d: %s\n", retval, db_strerror(retval), 0);
+@@ -190,7 +231,13 @@ error:
+ 	return retval;
+ }
+ 
+-int dblayer_copy_file_resetlsns(char *home_dir ,char *source_file_name, char *destination_file_name, int overwrite, dblayer_private *priv)
++int
++dblayer_copy_file_resetlsns(char *home_dir,
++                            char *source_file_name,
++                            char *destination_file_name,
++                            int overwrite,
++                            dblayer_private *priv,
++                            ldbm_instance *inst)
+ {
+ 	int retval = 0;
+ 	DB_ENV *env = NULL;
+@@ -205,7 +252,7 @@ int dblayer_copy_file_resetlsns(char *home_dir ,char *source_file_name, char *de
+ 		goto out;
+ 	}
+ 	/* Do the copy */
+-	retval = dblayer_copy_file_keybykey(env, source_file_name, destination_file_name, overwrite, priv);
++	retval = dblayer_copy_file_keybykey(env, source_file_name, destination_file_name, overwrite, priv, inst);
+ 	if (retval) {
+ 		LDAPDebug(LDAP_DEBUG_ANY, "dblayer_copy_file_resetlsns: Copy not completed successfully.", 0, 0, 0);
+ 	}
+diff --git a/ldap/servers/slapd/back-ldbm/dblayer.c b/ldap/servers/slapd/back-ldbm/dblayer.c
+index fab61f3..5fdca28 100644
+--- a/ldap/servers/slapd/back-ldbm/dblayer.c
++++ b/ldap/servers/slapd/back-ldbm/dblayer.c
+@@ -5546,6 +5546,7 @@ dblayer_copy_directory(struct ldbminfo *li,
+     char            inst_dir[MAXPATHLEN];
+     char            sep;
+     int             suffix_len = 0;
++    ldbm_instance *inst = NULL;
+ 
+     if (!src_dir || '\0' == *src_dir)
+     {
+@@ -5569,6 +5570,14 @@ dblayer_copy_directory(struct ldbminfo *li,
+     else
+         relative_instance_name++;
+ 
++    inst = ldbm_instance_find_by_name(li, relative_instance_name);
++    if (NULL == inst) {
++        LDAPDebug(LDAP_DEBUG_ANY, "Backend instance \"%s\" does not exist; "
++                  "Instance path %s could be invalid.\n",
++                  relative_instance_name, src_dir, 0);
++        return return_value;
++    }
++
+     if (is_fullpath(src_dir))
+     {
+         new_src_dir = src_dir;
+@@ -5576,15 +5585,6 @@ dblayer_copy_directory(struct ldbminfo *li,
+     else
+     {
+         int len;
+-        ldbm_instance *inst =
+-                       ldbm_instance_find_by_name(li, relative_instance_name);
+-        if (NULL == inst)
+-        {
+-            LDAPDebug(LDAP_DEBUG_ANY, "Backend instance \"%s\" does not exist; "
+-                  "Instance path %s could be invalid.\n",
+-                  relative_instance_name, src_dir, 0);
+-            return return_value;
+-        }
+ 
+         inst_dirp = dblayer_get_full_inst_dir(inst->inst_li, inst,
+                                               inst_dir, MAXPATHLEN);
+@@ -5642,7 +5642,7 @@ dblayer_copy_directory(struct ldbminfo *li,
+             if (NULL == new_dest_dir) {
+                 /* Need to create the new directory where the files will be
+                  * copied to. */
+-                PRFileInfo info;
++                PRFileInfo64 info;
+                 char *prefix = "";
+                 char mysep = 0;
+ 
+@@ -5663,7 +5663,7 @@ dblayer_copy_directory(struct ldbminfo *li,
+                     new_dest_dir = slapi_ch_smprintf("%s/%s",
+                         dest_dir, relative_instance_name);
+                 /* } */
+-                if (PR_SUCCESS == PR_GetFileInfo(new_dest_dir, &info))
++                if (PR_SUCCESS == PR_GetFileInfo64(new_dest_dir, &info))
+                 {
+                     ldbm_delete_dirs(new_dest_dir);
+                 }
+@@ -5704,13 +5704,12 @@ dblayer_copy_directory(struct ldbminfo *li,
+             /* If the file is a database file, and resetlsns is set, then we need to do a key by key copy */
+             /* PL_strcmp takes NULL arg */
+             if (resetlsns &&
+-                (PL_strcmp(LDBM_FILENAME_SUFFIX, strrchr(filename1, '.'))
+-                 == 0)) {
++                (PL_strcmp(LDBM_FILENAME_SUFFIX, strrchr(filename1, '.')) == 0)) {
+                 return_value = dblayer_copy_file_resetlsns(src_dir, filename1, filename2,
+-                                            0, priv);
++                                                           0, priv, inst);
+             } else {
+                 return_value = dblayer_copyfile(filename1, filename2,
+-                                            0, priv->dblayer_file_mode);
++                                                0, priv->dblayer_file_mode);
+             }
+             slapi_ch_free((void**)&filename1);
+             slapi_ch_free((void**)&filename2);
+diff --git a/ldap/servers/slapd/back-ldbm/dblayer.h b/ldap/servers/slapd/back-ldbm/dblayer.h
+index 7f3200c..4ff9d53 100644
+--- a/ldap/servers/slapd/back-ldbm/dblayer.h
++++ b/ldap/servers/slapd/back-ldbm/dblayer.h
+@@ -201,7 +201,7 @@ int dblayer_make_private_simple_env(char *db_home_dir, DB_ENV **env);
+ /* Copy a database file, preserving all its contents (used to reset the LSNs in the file in order to move 
+  * it from one transacted environment to another.
+  */
+-int dblayer_copy_file_resetlsns(char *home_dir, char *source_file_name, char *destination_file_name, int overwrite, dblayer_private *priv);
++int dblayer_copy_file_resetlsns(char *home_dir, char *source_file_name, char *destination_file_name, int overwrite, dblayer_private *priv, ldbm_instance *inst);
+ /* Turn on the various logging and debug options for DB */
+ void dblayer_set_env_debugging(DB_ENV *pEnv, dblayer_private *priv);
+ 
+-- 
+1.8.1.4
+

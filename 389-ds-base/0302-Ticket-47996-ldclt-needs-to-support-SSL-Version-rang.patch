@@ -1,0 +1,82 @@
+From f9592d83d8804ba9f39912679f6c87bc343ec719 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Wed, 21 Jan 2015 17:36:29 -0800
+Subject: [PATCH 302/305] Ticket #47996 - ldclt needs to support SSL Version
+ range
+
+Description: ldclt did not have a code to set the enabled SSL version.
+This patch sets the range.min and range.max based upon the range that
+the linked NSS provides.
+
+https://fedorahosted.org/389/ticket/47996
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+
+(cherry picked from commit 7c30e11f6f337472dace6f146845bb14f5601e2b)
+(cherry picked from commit 6431142506a05e9ef4c095b538d7d852f176e300)
+(cherry picked from commit cef5810bd981d2080820ce58f20504fbfd95c54c)
+(cherry picked from commit d26ed48cb78c034462757dece5dfcb2ef569bdd1)
+---
+ ldap/servers/slapd/tools/ldclt/ldapfct.c | 25 +++++++++++++++++--------
+ 1 file changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/ldap/servers/slapd/tools/ldclt/ldapfct.c b/ldap/servers/slapd/tools/ldclt/ldapfct.c
+index 8fd3304..1c9aea0 100644
+--- a/ldap/servers/slapd/tools/ldclt/ldapfct.c
++++ b/ldap/servers/slapd/tools/ldclt/ldapfct.c
+@@ -275,6 +275,7 @@ int ldclt_build_control( char *oid, BerElement *ber, int freeber, char iscritica
+ #endif
+ int ldclt_alloc_ber( LDAP *ld, BerElement **berp );
+ 
++static SSLVersionRange enabledNSSVersions;
+ 
+ /* ****************************************************************************
+ 	FUNCTION :	my_ldap_err2string
+@@ -647,14 +648,6 @@ ldclt_clientauth(thread_context	*tttctx, LDAP *ld, const char *path, const char
+       thrdNum = tttctx->thrdNum;
+   }
+ 
+-  rc = NSS_Initialize(path, "", "", SECMOD_DB, NSS_INIT_READONLY);
+-  if (rc != SECSuccess) {
+-    printf ("ldclt[%d]: T%03d: Cannot NSS_Initialize(%s) %d\n",
+-	    mctx.pid, thrdNum, path, PR_GetError());
+-    fflush(stdout);
+-    goto done;
+-  }
+-
+   if ((colon = PL_strchr(certname, ':' ))) {
+     token_name = PL_strndup(certname, colon-certname);
+   }
+@@ -741,6 +734,7 @@ connectToLDAP(thread_context *tttctx, const char *bufBindDN, const char *bufPass
+   int thrdNum = 0;
+   int ret = -1;
+   int binded = 0;
++  SSLVersionRange range;
+ 
+   if (tttctx) {
+     thrdNum = tttctx->thrdNum;
+@@ -787,6 +781,21 @@ connectToLDAP(thread_context *tttctx, const char *bufBindDN, const char *bufPass
+       free(certdir);
+       goto done;
+     }
++	/* Initialize NSS */
++    ret = NSS_Initialize(certdir, "", "", SECMOD_DB, NSS_INIT_READONLY);
++    if (ret != SECSuccess) {
++      printf ("ldclt[%d]: T%03d: Cannot NSS_Initialize(%s) %d\n",
++              mctx.pid, thrdNum, certdir, PR_GetError());
++      fflush(stdout);
++      goto done;
++    }
++
++	/* Set supported SSL version range. */
++    SSL_VersionRangeGetSupported(ssl_variant_stream, &enabledNSSVersions);
++    range.min = enabledNSSVersions.min;
++    range.max = enabledNSSVersions.max;
++    SSL_VersionRangeSetDefault(ssl_variant_stream, &range);
++
+     if ((mode & CLTAUTH) &&
+         (ret = ldclt_clientauth(tttctx, ld, certdir, mctx.cltcertname, mctx.keydbpin))) {
+       free(certdir);
+-- 
+1.9.3
+

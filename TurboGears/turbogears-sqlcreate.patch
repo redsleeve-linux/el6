@@ -1,0 +1,26 @@
+Index: TurboGears-1.1.1/turbogears/command/base.py
+===================================================================
+--- TurboGears-1.1.1.orig/turbogears/command/base.py
++++ TurboGears-1.1.1/turbogears/command/base.py
+@@ -125,11 +125,20 @@ class SQL(CommandWithDB):
+                     if not eggname or not os.path.exists(
+                             os.path.join(eggname[0], 'sqlobject.txt')):
+                         eggname = self.fix_egginfo(eggname)
++                    # Turn the egg directory name into a package name
+                     eggname = eggname[0].replace('.egg-info', '')
++                    pkgname = '-'.join(eggname.split('-')[:-2])
++                    try:
++                        # Add the version info with proper syntax if it exists
++                        pkgversion = eggname.split('-')[-2]
++                    except IndexError:
++                        pkgname = eggname
++                    else:
++                        pkgname = '%s == %s' % (pkgname, pkgversion)
+                     if not '.' in sys.path:
+                         sys.path.append('.')
+                         pkg_resources.working_set.add_entry('.')
+-                    sys.argv.insert(2, eggname)
++                    sys.argv.insert(2, pkgname)
+                     sys.argv.insert(2, '--egg')
+ 
+             socommand.the_runner.run(sys.argv)

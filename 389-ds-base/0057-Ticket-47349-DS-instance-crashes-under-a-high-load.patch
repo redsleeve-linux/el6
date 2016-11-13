@@ -1,0 +1,82 @@
+From 899662a8fc635997586e9891f3d93629b479dc96 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Wed, 24 Apr 2013 20:36:37 -0600
+Subject: [PATCH 57/99] Ticket #47349 - DS instance crashes under a high load
+
+https://fedorahosted.org/389/ticket/47349
+Reviewed by: nkinder (Thanks!)
+Branch: 389-ds-base-1.2.11
+Fix Description: handle_new_connection initializes the connection object,
+then calls connection_table_move_connection_on_to_active_list to put it
+on the list of active connections, then unlocks the c_mutex, then calls
+connection_new_private to allocate c_private.  If another thread
+interrupts after the conn has been moved to the active list, but before
+c_private has been allocated, the new conn will be available via
+connection_table_iterate_active_connections where table_iterate_function
+will attempt to dereference the NULL c_private.
+The fix is to move connection_new_private inside the c_mutex lock, and to
+move connection_table_move_connection_on_to_active_list to be the very last
+thing before releasing the c_mutex lock.  Once the conn is on the active
+list it is live and we cannot do anything else to it.
+Note: I have still not been able to reproduce the problem in a non-debug
+optimized build.
+Platforms tested: RHEL6 x86_64
+Note: Before patch, server would crash within 5 minutes.  After patch, server
+has been running for several days in customer environment.
+Flag Day: no
+Doc impact: no
+(cherry picked from commit 05d209432571dc64b242ae47113ae4cbb43607d2)
+(cherry picked from commit 11c0f99aaa2deead80bde7e35dd9f9aabac5cc20)
+(cherry picked from commit d1754414bffca63ceec42812387e233c717fe14e)
+---
+ ldap/servers/slapd/daemon.c | 25 +++++++++++++------------
+ 1 file changed, 13 insertions(+), 12 deletions(-)
+
+diff --git a/ldap/servers/slapd/daemon.c b/ldap/servers/slapd/daemon.c
+index 0304e4a..0a87293 100644
+--- a/ldap/servers/slapd/daemon.c
++++ b/ldap/servers/slapd/daemon.c
+@@ -2685,16 +2685,6 @@ handle_new_connection(Connection_Table *ct, int tcps, PRFileDesc *pr_acceptfd, i
+ 	/* Call the plugin extension constructors */
+ 	conn->c_extension = factory_create_extension(connection_type,conn,NULL /* Parent */);
+ 
+-
+-	/* Add this connection slot to the doubly linked list of active connections.  This
+-	 * list is used to find the connections that should be used in the poll call. This 
+-	 * connection will be added directly after slot 0 which serves as the head of the list */
+-	if ( conn != NULL && conn->c_next == NULL && conn->c_prev == NULL )
+-	{
+-		/* Now give the new connection to the connection code */
+-		connection_table_move_connection_on_to_active_list(the_connection_table,conn);
+-	}
+-
+ #if defined(ENABLE_LDAPI)
+ #if !defined( XP_WIN32 )
+ 	/* ldapi */
+@@ -2707,10 +2697,21 @@ handle_new_connection(Connection_Table *ct, int tcps, PRFileDesc *pr_acceptfd, i
+ #endif
+ #endif /* ENABLE_LDAPI */
+ 
+-	PR_Unlock( conn->c_mutex );
+-
+ 	connection_new_private(conn);
+ 
++	/* Add this connection slot to the doubly linked list of active connections.  This
++	 * list is used to find the connections that should be used in the poll call. This
++	 * connection will be added directly after slot 0 which serves as the head of the list.
++	 * This must be done as the very last thing before we unlock the mutex, because once it
++	 * is added to the active list, it is live. */
++	if ( conn != NULL && conn->c_next == NULL && conn->c_prev == NULL )
++	{
++		/* Now give the new connection to the connection code */
++		connection_table_move_connection_on_to_active_list(the_connection_table,conn);
++	}
++
++	PR_Unlock( conn->c_mutex );
++
+ 	g_increment_current_conn_count();
+ 
+ 	return 0;
+-- 
+1.8.1.4
+

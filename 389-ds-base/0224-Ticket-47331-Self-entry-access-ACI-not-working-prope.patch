@@ -1,0 +1,148 @@
+From ac35b0d68dce1742f0d32a6fefc4e9d38cd3114c Mon Sep 17 00:00:00 2001
+From: "Thierry bordaz (tbordaz)" <tbordaz@redhat.com>
+Date: Mon, 22 Apr 2013 14:15:33 +0200
+Subject: [PATCH 224/225] Ticket 47331 - Self entry access ACI not working
+ properly
+
+Bug Description:
+
+	There are two issues in that bug.
+
+	The first one is that for a given entry, the rights related to an attribute are evaluated and cached. Reusing this evaluation for a different entry is erronous.
+
+	The second one is that for each deny/allow aci, the results of the evaluation of the aci is cached. These results
+	are reset for aci type that are entry related.  The parsing of the rule self entry access miss the setting
+	of ACI_USERDN_SELFRULE.
+	This flag allows to reset (in result cache) a result obtained on a previous entry. The consequence is that
+	a previous result was erronously reused.
+
+Fix Description:
+
+	The fix for the first issue, is to prevent acl__match_handlesFromCache to reuse already evaluated attributes.
+	A new flag make acl__match_handlesFromCache to return if the evaluation is entry related.
+
+	The second fix is to set ACI_USERDN_SELFRULE, when we have a rule like 'userdn = ldap:///self'
+
+https://fedorahosted.org/389/ticket/47331
+
+Reviewed by: Noriko Hosoi, Ludwig Krispenz
+
+Platforms tested: fedora 17
+
+Flag Day: no
+
+Doc impact: no
+(cherry picked from commit 79346deb255ca8d7889d7590534d308d4e3a78da)
+(cherry picked from commit 1580bcd71cbb60f0e97a36bf83faca6e079cd861)
+(cherry picked from commit 46b06bb3f12be8df973579971c5cdf4312456974)
+---
+ ldap/servers/plugins/acl/acl.c      | 28 ++++++++++++++++++++++++++--
+ ldap/servers/plugins/acl/acl.h      |  1 +
+ ldap/servers/plugins/acl/aclparse.c | 19 +++++++++++++++++++
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/plugins/acl/acl.c b/ldap/servers/plugins/acl/acl.c
+index 09f28ee..d27c0e1 100644
+--- a/ldap/servers/plugins/acl/acl.c
++++ b/ldap/servers/plugins/acl/acl.c
+@@ -2799,6 +2799,11 @@ acl__TestRights(Acl_PBlock *aclpb,int access, char **right, char ** map_generic,
+ 
+ 		if (access  & ( SLAPI_ACL_SEARCH | SLAPI_ACL_READ)) {
+ 
++                        /* We can not reused results obtained on a other entry */
++                        if (aci->aci_type & ACI_CACHE_RESULT_PER_ENTRY) {
++                                aclpb->aclpb_state |= ACLPB_CACHE_RESULT_PER_ENTRY_SKIP;
++                        }
++                        
+ 			/*
+ 			 * aclpb->aclpb_cache_result[0..aclpb->aclpb_last_cache_result] is
+ 			 * a cache of info about whether applicable acis
+@@ -3010,6 +3015,10 @@ acl__TestRights(Acl_PBlock *aclpb,int access, char **right, char ** map_generic,
+ 
+ 		if (access  & ( SLAPI_ACL_SEARCH | SLAPI_ACL_READ)) {
+ 
++                        /* We can not reused results obtained on a other entry */
++                        if (aci->aci_type & ACI_CACHE_RESULT_PER_ENTRY) {
++                                aclpb->aclpb_state |= ACLPB_CACHE_RESULT_PER_ENTRY_SKIP;
++                        }
+ 			/*
+ 			 * aclpb->aclpb_cache_result[0..aclpb->aclpb_last_cache_result] is
+ 			 * a cache of info about whether applicable acis
+@@ -3794,8 +3803,23 @@ acl__match_handlesFromCache (  Acl_PBlock *aclpb, char *attr, int access)
+ 	 } else {
+ 		context_type =  ACLPB_EVALCONTEXT_PREV;
+ 		c_evalContext = &aclpb->aclpb_prev_entryEval_context;
+-	}
+-
++        }
++
++        /* we can not reused access evaluation done on a previous entry
++         * so just skip that cache
++         */
++        if (aclpb->aclpb_state & ACLPB_CACHE_RESULT_PER_ENTRY_SKIP) {
++                aclpb->aclpb_state &= ~ACLPB_MATCHES_ALL_ACLS;
++                aclpb->aclpb_state |= ACLPB_UPD_ACLCB_CACHE;
++                /* Did not match */
++                if (context_type == ACLPB_EVALCONTEXT_ACLCB) {
++                        aclpb->aclpb_state &= ~ACLPB_HAS_ACLCB_EVALCONTEXT;
++                } else {
++                        aclpb->aclpb_state |= ACLPB_COPY_EVALCONTEXT;
++                        c_evalContext->acle_numof_tmatched_handles = 0;
++                }
++                return -1;
++        }
+ 
+  	if ( aclpb->aclpb_res_type & (ACLPB_NEW_ENTRY | ACLPB_EFFECTIVE_RIGHTS) ) { 
+ 		aclpb->aclpb_state |= ACLPB_MATCHES_ALL_ACLS;
+diff --git a/ldap/servers/plugins/acl/acl.h b/ldap/servers/plugins/acl/acl.h
+index c61ee70..dbe5c11 100644
+--- a/ldap/servers/plugins/acl/acl.h
++++ b/ldap/servers/plugins/acl/acl.h
+@@ -468,6 +468,7 @@ struct acl_pblock {
+ #define	ACLPB_UPD_ACLCB_CACHE				0x100000
+ #define	ACLPB_ATTR_RULE_EVALUATED			0x200000
+ #define ACLPB_DONOT_EVALUATE_PROXY			0x400000
++#define ACLPB_CACHE_RESULT_PER_ENTRY_SKIP               0x800000
+ 
+ 
+ #define ACLPB_RESET_MASK ( ACLPB_ACCESS_ALLOWED_ON_A_ATTR | ACLPB_ACCESS_DENIED_ON_ALL_ATTRS | \
+diff --git a/ldap/servers/plugins/acl/aclparse.c b/ldap/servers/plugins/acl/aclparse.c
+index 8b11471..26d57c4 100644
+--- a/ldap/servers/plugins/acl/aclparse.c
++++ b/ldap/servers/plugins/acl/aclparse.c
+@@ -784,6 +784,8 @@ normalize_nextACERule:
+ 				goto error;
+ 			}
+ 		} else if ( 0 == strncmp ( s, DS_LAS_USERDN, 6 )) {
++                        char *prefix;
++                        
+ 			p = PL_strnchr (s, '=', end - s);
+ 			if (NULL == p) {
+ 				goto error;
+@@ -808,6 +810,23 @@ normalize_nextACERule:
+ 				goto error;
+ 			}
+ 
++                        /* skip the ldap prefix */
++                        prefix = PL_strncasestr(p, LDAP_URL_prefix, end - p);
++                        if (prefix) {
++                                prefix += strlen(LDAP_URL_prefix);
++                        } else {
++                                prefix = PL_strncasestr(p, LDAPS_URL_prefix, end - p);
++                                if (prefix) {
++                                        prefix += strlen(LDAPS_URL_prefix);
++                                }
++                        }
++                        if (prefix == NULL) {
++                                /* userdn value does not starts with LDAP(S)_URL_prefix */
++                                goto error;
++                        }
++                        p = prefix;
++
++
+ 			/* we have a rule like userdn = "ldap:///blah". s points to blah now.
+ 			** let's find if we have a SELF rule like userdn = "ldap:///self".
+ 			** Since the resource changes on entry basis, we can't cache the 
+-- 
+1.8.1.4
+

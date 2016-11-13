@@ -1,0 +1,34 @@
+From 7bff6683b3a3f63b9002ad660229cf234c6ae956 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Tue, 30 Apr 2013 10:22:59 -0700
+Subject: [PATCH 225/225] Ticket 47331 - Self entry access ACI not working
+ properly
+
+Description: Additional change to
+  commit 79346deb255ca8d7889d7590534d308d4e3a78da
+which added a macro ACLPB_CACHE_RESULT_PER_ENTRY_SKIP, but
+ACLPB_STATE_ALL was not updated to cover the bit.
+This patch updates ACLPB_STATE_ALL to support the new bit.
+(cherry picked from commit 86fea4b326b28912cd0d8de0d0cb3a2f8dea423e)
+(cherry picked from commit 6d43552d862234334f94a5768132d71847bfcd20)
+(cherry picked from commit d8f6af4242a8f546a2d60a10b48fd8e24a9e72d9)
+---
+ ldap/servers/plugins/acl/acl.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ldap/servers/plugins/acl/acl.h b/ldap/servers/plugins/acl/acl.h
+index dbe5c11..8a9bec2 100644
+--- a/ldap/servers/plugins/acl/acl.h
++++ b/ldap/servers/plugins/acl/acl.h
+@@ -475,7 +475,7 @@ struct acl_pblock {
+ 			   ACLPB_ACCESS_ALLOWED_ON_ENTRY | ACLPB_ATTR_STAR_MATCHED |  \
+ 			   ACLPB_FOUND_ATTR_RULE | ACLPB_EVALUATING_FIRST_ATTR |  \
+ 			   ACLPB_FOUND_A_ENTRY_TEST_RULE )
+-#define ACLPB_STATE_ALL				0x3fffff
++#define ACLPB_STATE_ALL				0xffffff
+ 
+ 	int						aclpb_res_type;
+ 
+-- 
+1.8.1.4
+

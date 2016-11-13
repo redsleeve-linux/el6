@@ -1,0 +1,46 @@
+From 470ff92cb147334a4a59822eb2f15c67e34af3a7 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Fri, 14 Jun 2013 15:28:57 -0400
+Subject: [PATCH 95/99] Coverity Fixes (Part 7)
+
+11704 - Dereference after null check:  repl5_replica_config.c
+
+https://bugzilla.redhat.com/show_bug.cgi?id=970221
+
+Reviewed by: richm(Thanks!)
+(cherry picked from commit a2cfcf7ff93bf2ef7a3cf4ad2ba2c4e0bd098a3a)
+(cherry picked from commit e3b8e2f82b3d5b6223c65db8649e7ddcb46ee916)
+---
+ ldap/servers/plugins/replication/repl5_replica_config.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/ldap/servers/plugins/replication/repl5_replica_config.c b/ldap/servers/plugins/replication/repl5_replica_config.c
+index 0b72bec..c2ad504 100644
+--- a/ldap/servers/plugins/replication/repl5_replica_config.c
++++ b/ldap/servers/plugins/replication/repl5_replica_config.c
+@@ -2382,6 +2382,13 @@ delete_cleaned_rid_config(cleanruv_data *clean_data)
+      *  Search the config for the exact attribute value to delete
+      */
+     pb = slapi_pblock_new();
++    if(clean_data->replica){
++        dn = replica_get_dn(clean_data->replica);
++    } else {
++        rc = -1;
++        goto bail;
++    }
++
+     dn = replica_get_dn(clean_data->replica);
+     slapi_search_internal_set_pb(pb, dn, LDAP_SCOPE_SUBTREE, "nsds5ReplicaCleanRUV=*", NULL, 0, NULL, NULL,
+         (void *)plugin_get_default_component_id(), 0);
+@@ -2445,6 +2452,8 @@ delete_cleaned_rid_config(cleanruv_data *clean_data)
+     slapi_modify_internal_set_pb(pb, dn, mods, NULL, NULL, repl_get_plugin_identity (PLUGIN_MULTIMASTER_REPLICATION), 0);
+     slapi_modify_internal_pb (pb);
+     slapi_pblock_get(pb, SLAPI_PLUGIN_INTOP_RESULT, &rc);
++
++bail:
+     if (rc != LDAP_SUCCESS && rc != LDAP_NO_SUCH_OBJECT){
+         slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name, "CleanAllRUV Task: failed to remove replica config "
+             "(%d), rid (%d)\n", rc, clean_data->rid);
+-- 
+1.8.1.4
+

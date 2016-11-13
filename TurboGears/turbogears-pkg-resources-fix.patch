@@ -1,0 +1,40 @@
+Index: TurboGears-1.1.2/setup.py
+===================================================================
+--- TurboGears-1.1.2.orig/setup.py
++++ TurboGears-1.1.2/setup.py
+@@ -1,5 +1,8 @@
+ # -*- coding: UTF-8 -*-
+ 
++__requires__ = ['TurboGears']
++import pkg_resources
++
+ import os
+ import sys
+ 
+Index: TurboGears-1.1.2/turbogears/qstemplates/quickstart/setup.py_tmpl
+===================================================================
+--- TurboGears-1.1.2.orig/turbogears/qstemplates/quickstart/setup.py_tmpl
++++ TurboGears-1.1.2/turbogears/qstemplates/quickstart/setup.py_tmpl
+@@ -1,5 +1,8 @@
+ # -*- coding: utf-8 -*-
+ 
++__requires__ = ['TurboGears']
++import pkg_resources
++
+ from setuptools import setup, find_packages
+ from setuptools.command.build_py import build_py
+ from turbogears.finddata import find_package_data
+Index: TurboGears-1.1.2/turbogears/qstemplates/quickstart/start-+package+.py_tmpl
+===================================================================
+--- TurboGears-1.1.2.orig/turbogears/qstemplates/quickstart/start-+package+.py_tmpl
++++ TurboGears-1.1.2/turbogears/qstemplates/quickstart/start-+package+.py_tmpl
+@@ -7,6 +7,9 @@ directory. When the project is installed
+ proper start script.
+ """
+ 
++__requires__ = ['TurboGears']
++import pkg_resources
++
+ import sys
+ from ${package}.command import start, ConfigurationError
+ 

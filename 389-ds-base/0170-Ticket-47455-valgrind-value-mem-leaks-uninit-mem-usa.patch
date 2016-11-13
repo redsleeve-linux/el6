@@ -1,0 +1,123 @@
+From c6ffb6173c57228a48f97e935b7f6436a3897063 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Mon, 24 Feb 2014 16:42:36 -0800
+Subject: [PATCH 170/225] Ticket #47455 - valgrind - value mem leaks, uninit
+ mem usage
+
+Backported the valueset.c part of commit 3adc242bcc8c6d0d05d5d9773f32b4f81afb6e6d.
+  Author: Rich Megginson <rmeggins@redhat.com>
+
+  https://fedorahosted.org/389/ticket/47455
+  Fix Description: The problem was that slapi_valueset_add_attr_valuearray_ext
+  was assuming the caller was going to free the entire given vs upon failure.
+  This is fine for the value replace case but not for the add 1 value case.
+  Callers of slapi_valueset_add_attr_valuearray_ext must provide
+  the dup_index parameter if using SLAPI_VALUE_FLAG_PASSIN and
+  SLAPI_VALUE_FLAG_DUPCHECK, and if there is more than one value.  The caller
+  needs to know which of the values from addvals is in vs to properly clean up
+  with no memory leaks.
+  Platforms tested: RHEL6 x86_64
+  Flag Day: no
+  Doc impact: no
+  (cherry picked from commit 3adc242bcc8c6d0d05d5d9773f32b4f81afb6e6d)
+  (cherry picked from commit 6357ced2e4380def053966e849eac45e44009662)
+(cherry picked from commit 8252d02654cc616beb4558421cd292d470b150cf)
+---
+ ldap/servers/slapd/valueset.c | 55 +++++++++++++++++++++++++++++++------------
+ 1 file changed, 40 insertions(+), 15 deletions(-)
+
+diff --git a/ldap/servers/slapd/valueset.c b/ldap/servers/slapd/valueset.c
+index 4ee2938..29078d4 100644
+--- a/ldap/servers/slapd/valueset.c
++++ b/ldap/servers/slapd/valueset.c
+@@ -1014,6 +1014,15 @@ valueset_insert_value_to_sorted(const Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_V
+ 		
+ }
+ 
++/*
++ * If this function returns an error, it is safe to do both
++ * slapi_valueset_done(vs);
++ * and
++ * valuearray_free(&addvals);
++ * if there is an error and the PASSIN flag is used, the addvals array will own all of the values
++ * vs will own none of the values - so you should do both slapi_valueset_done(vs) and valuearray_free(&add
++ * to clean up
++ */
+ int
+ slapi_valueset_add_attr_valuearray_ext(const Slapi_Attr *a, Slapi_ValueSet *vs, 
+ 					Slapi_Value **addvals, int naddvals, unsigned long flags, int *dup_index)
+@@ -1086,8 +1095,13 @@ slapi_valueset_add_attr_valuearray_ext(const Slapi_Attr *a, Slapi_ValueSet *vs,
+ 				if (dup < 0 ) {
+ 					rc = LDAP_TYPE_OR_VALUE_EXISTS;
+ 					if (dup_index) *dup_index = i;
+-					if ( !passin) 
++					if (passin) {
++						PR_ASSERT((i == 0) || dup_index);
++						/* caller must provide dup_index to know how far we got in addvals */
++						(vs->va)[vs->num] = NULL;
++					} else {
+ 						slapi_value_free(&(vs->va)[vs->num]);
++					}
+ 					break;
+ 				}
+ 			} else {
+@@ -1310,31 +1324,42 @@ valueset_replace_valuearray_ext(Slapi_Attr *a, Slapi_ValueSet *vs, Slapi_Value *
+ 	vs->max = vals_count + 1;
+     } else {
+ 	/* verify the given values are not duplicated.  */
++	unsigned long flags = SLAPI_VALUE_FLAG_PASSIN|SLAPI_VALUE_FLAG_DUPCHECK;
++	int dupindex = 0;
+ 	Slapi_ValueSet *vs_new = slapi_valueset_new();
+-	rc = slapi_valueset_add_attr_valuearray_ext (a, vs_new, valstoreplace, vals_count, 0, NULL);
++	rc = slapi_valueset_add_attr_valuearray_ext (a, vs_new, valstoreplace, vals_count, flags, &dupindex);
+ 
+ 	if ( rc == LDAP_SUCCESS )
+ 	{
++		/* used passin, so vs_new owns all of the Slapi_Value* in valstoreplace
++		 * so tell valuearray_free_ext to start at index vals_count, which is
++		 * NULL, then just free valstoreplace
++		 */
++		valuearray_free_ext(&valstoreplace, vals_count);
+ 		/* values look good - replace the values in the attribute */
+-        	if(!valuearray_isempty(vs->va))
+-        	{
+-            		/* remove old values */
+-            		slapi_valueset_done(vs);
+-        	}
+-        	vs->va = vs_new->va;
++		if(!valuearray_isempty(vs->va))
++		{
++			/* remove old values */
++			slapi_valueset_done(vs);
++		}
++		vs->va = vs_new->va;
+ 		vs_new->va = NULL;
+-        	vs->sorted = vs_new->sorted;
++		vs->sorted = vs_new->sorted;
+ 		vs_new->sorted = NULL;
+-        	vs->num = vs_new->num;
+-        	vs->max = vs_new->max;
++		vs->num = vs_new->num;
++		vs->max = vs_new->max;
+ 		slapi_valueset_free (vs_new);
+ 	}
+ 	else
+ 	{
+-	        /* caller expects us to own valstoreplace - since we cannot
+-	           use them, just delete them */
+-        	slapi_valueset_free(vs_new);
+-        	valuearray_free(&valstoreplace);
++		/* caller expects us to own valstoreplace - since we cannot
++		 use them, just delete them */
++		/* using PASSIN, some of the Slapi_Value* are in vs_new, and the rest
++		 * after dupindex are in valstoreplace
++		 */
++		slapi_valueset_free(vs_new);
++		valuearray_free_ext(&valstoreplace, dupindex);
++		PR_ASSERT((vs->sorted == NULL) || (vs->num == 0) || ((vs->sorted[0] >= 0) && (vs->sorted[0] < vs->num)));
+ 	}
+     }
+     return rc;
+-- 
+1.8.1.4
+

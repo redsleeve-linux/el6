@@ -1,0 +1,36 @@
+From eedc572f10eb41550ef2097dfee6cab3f9afaec8 Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Wed, 31 Jul 2013 13:25:00 -0600
+Subject: [PATCH 99/99] Revert "fix coverity 11915 - dead code - introduced
+ with fix for ticket 346"
+
+This reverts commit dc9192efc1c502e53e54291a8afda33f56a97d03.
+(cherry picked from commit 6b1cdd506eecfe575fe248e25d498fd07d512736)
+---
+ ldap/servers/slapd/attr.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/attr.c b/ldap/servers/slapd/attr.c
+index ed6d8de..87dfe1e 100644
+--- a/ldap/servers/slapd/attr.c
++++ b/ldap/servers/slapd/attr.c
+@@ -767,6 +767,7 @@ attr_add_valuearray(Slapi_Attr *a, Slapi_Value **vals, const char *dn)
+     int i = 0;
+     int numofvals = 0;
+     int duplicate_index = -1;
++    int was_present_null = 0;
+     int rc = LDAP_SUCCESS;
+ 
+     if (valuearray_isempty(vals)) {
+@@ -865,7 +866,7 @@ attr_add_valuearray(Slapi_Attr *a, Slapi_Value **vals, const char *dn)
+                 duplicate_string,
+                 a->a_type,
+                 dn ? dn : "<null>", 
+-                "value exists");
++                (was_present_null ? "duplicate new value" : "value exists"));
+     }
+     return( rc );
+ }
+-- 
+1.8.1.4
+

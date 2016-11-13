@@ -1,0 +1,45 @@
+From 6f45b5bffacf2c40d59162944cc8d2327b03d4e0 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Thu, 19 Jun 2014 17:44:57 -0700
+Subject: [PATCH 228/228] Ticket #47820 - 1.2.11 branch: coverity errors 2
+
+Description:
+Porting problem.
+Adding "struct asyntaxinfo *attr_syntax_get_by_name_with_default ( const char *name );" to ldap/servers/slapd/proto-slap.h
+Adding "int slapi_attr_init_syntax(Slapi_Attr *a);" to ldap/servers/slapd/slapi-private.h
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1111404
+---
+ ldap/servers/slapd/proto-slap.h    | 1 +
+ ldap/servers/slapd/slapi-private.h | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 8c9f0fb..1fb782b 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -134,6 +134,7 @@ void attr_syntax_delete_all_not_flagged( unsigned long flag );
+ struct asyntaxinfo *attr_syntax_get_by_oid ( const char *oid );
+ struct asyntaxinfo *attr_syntax_get_by_name ( const char *name );
+ struct asyntaxinfo *attr_syntax_get_by_name_locking_optional ( const char *name, PRBool use_lock );
++struct asyntaxinfo *attr_syntax_get_by_name_with_default ( const char *name );
+ /*
+  * Call attr_syntax_return() when you are done using a value returned
+  * by attr_syntax_get_by_oid() or attr_syntax_get_by_name().
+diff --git a/ldap/servers/slapd/slapi-private.h b/ldap/servers/slapd/slapi-private.h
+index ecabbe2..940260f 100644
+--- a/ldap/servers/slapd/slapi-private.h
++++ b/ldap/servers/slapd/slapi-private.h
+@@ -354,6 +354,7 @@ int entry_add_dncsn_ext(Slapi_Entry *entry, const CSN *csn, PRUint32 flags);
+ Slapi_Attr *slapi_attr_init_locking_optional(Slapi_Attr *a, const char *type, PRBool use_lock);
+ int attr_set_csn( Slapi_Attr *a, const CSN *csn);
+ int attr_set_deletion_csn( Slapi_Attr *a, const CSN *csn);
++int slapi_attr_init_syntax(Slapi_Attr *a);
+ const CSN *attr_get_deletion_csn(const Slapi_Attr *a);
+ int attr_first_deleted_value( Slapi_Attr *a, Slapi_Value **v );
+ int attr_next_deleted_value( Slapi_Attr *a, int hint, Slapi_Value **v);
+-- 
+1.8.1.4
+

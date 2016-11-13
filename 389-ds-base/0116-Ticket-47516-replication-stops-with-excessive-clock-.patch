@@ -1,0 +1,151 @@
+From 950e31275f70141fdb195162ce8d7dc5cc3b169e Mon Sep 17 00:00:00 2001
+From: Rich Megginson <rmeggins@redhat.com>
+Date: Wed, 18 Sep 2013 12:32:23 -0600
+Subject: [PATCH 116/225] Ticket #47516 replication stops with excessive clock
+ skew
+
+https://fedorahosted.org/389/ticket/47516
+Reviewed by: nhosoi (Thanks!)
+Branch: master
+Fix Description: Add a new configuration parameter to cn=config
+nsslapd-ignore-time-skew: on|off - default off
+If nsslapd-ignore-time-skew: on, the replication consumer will log errors
+about excessive time skew, but will allow replication to proceed, and will
+not return a time skew error to the replication supplier.
+Platforms tested: RHEL6 x86_64
+Flag Day: no
+Doc impact: yes - document new config param
+(cherry picked from commit 9dc7a4630cb13f1da074183208b1b34962fe8101)
+---
+ ldap/servers/plugins/replication/repl_extop.c | 11 +++++++--
+ ldap/servers/slapd/libglobs.c                 | 32 ++++++++++++++++++++++++++-
+ ldap/servers/slapd/proto-slap.h               |  2 ++
+ ldap/servers/slapd/slap.h                     |  2 ++
+ 4 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/ldap/servers/plugins/replication/repl_extop.c b/ldap/servers/plugins/replication/repl_extop.c
+index 37ee1ff..cccebb4 100644
+--- a/ldap/servers/plugins/replication/repl_extop.c
++++ b/ldap/servers/plugins/replication/repl_extop.c
+@@ -835,12 +835,19 @@ multimaster_extop_StartNSDS50ReplicationRequest(Slapi_PBlock *pb)
+ 				rc = replica_update_csngen_state_ext (replica, supplier_ruv, replicacsn); /* too much skew */
+ 				if (rc == CSN_LIMIT_EXCEEDED)
+ 				{
+-					response = NSDS50_REPL_EXCESSIVE_CLOCK_SKEW;
++					extern int config_get_ignore_time_skew();
++
+ 					slapi_log_error(SLAPI_LOG_FATAL, repl_plugin_name,
+ 									"conn=%" NSPRIu64 " op=%d repl=\"%s\": "
+ 									"Excessive clock skew from supplier RUV\n",
+ 									connid, opid, repl_root);
+-					goto send_response;
++					if (!config_get_ignore_time_skew()) {
++						response = NSDS50_REPL_EXCESSIVE_CLOCK_SKEW;
++						goto send_response;
++					} else {
++						/* else just continue */
++						rc = 0;
++					}
+ 				}
+ 				else if (rc != 0)
+ 				{
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index aaee33a..930fd72 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -696,7 +696,11 @@ static struct config_get_and_set {
+ 	{CONFIG_LISTEN_BACKLOG_SIZE, config_set_listen_backlog_size,
+ 		NULL, 0,
+ 		(void**)&global_slapdFrontendConfig.listen_backlog_size, CONFIG_INT,
+-		(ConfigGetFunc)config_get_listen_backlog_size}
++		(ConfigGetFunc)config_get_listen_backlog_size},
++	{CONFIG_IGNORE_TIME_SKEW, config_set_ignore_time_skew,
++		NULL, 0,
++		(void**)&global_slapdFrontendConfig.ignore_time_skew,
++		CONFIG_ON_OFF, (ConfigGetFunc)config_get_ignore_time_skew}
+ #ifdef MEMPOOL_EXPERIMENTAL
+ 	,{CONFIG_MEMPOOL_SWITCH_ATTRIBUTE, config_set_mempool_switch,
+ 		NULL, 0,
+@@ -1100,6 +1104,7 @@ FrontendConfig_init () {
+   cfg->sasl_max_bufsize = SLAPD_DEFAULT_SASL_MAXBUFSIZE;
+ 
+   cfg->listen_backlog_size = DAEMON_LISTEN_SIZE;
++  cfg->ignore_time_skew = LDAP_OFF;
+ #ifdef MEMPOOL_EXPERIMENTAL
+   cfg->mempool_switch = LDAP_ON;
+   cfg->mempool_maxfreelist = 1024;
+@@ -6215,6 +6220,31 @@ config_get_listen_backlog_size()
+   return retVal; 
+ }
+ 
++int
++config_get_ignore_time_skew(void)
++{
++    int retVal;
++    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++    CFG_LOCK_READ(slapdFrontendConfig);
++    retVal = slapdFrontendConfig->ignore_time_skew;
++    CFG_UNLOCK_READ(slapdFrontendConfig);
++
++    return retVal;
++}
++
++int
++config_set_ignore_time_skew( const char *attrname, char *value,
++                            char *errorbuf, int apply )
++{
++    int retVal = LDAP_SUCCESS;
++    slapdFrontendConfig_t *slapdFrontendConfig = getFrontendConfig();
++
++    retVal = config_set_onoff(attrname, value,
++                              &(slapdFrontendConfig->ignore_time_skew),
++                              errorbuf, apply);
++    return retVal;
++}
++
+ /*
+  * This function is intended to be used from the dse code modify callback.  It
+  * is "optimized" for that case because it takes a berval** of values, which is
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index d4c9ab6..c87d2f2 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -392,6 +392,7 @@ int config_set_disk_logging_critical( const char *attrname, char *value, char *e
+ int config_set_auditlog_unhashed_pw(const char *attrname, char *value, char *errorbuf, int apply);
+ int config_set_sasl_maxbufsize(const char *attrname, char *value, char *errorbuf, int apply );
+ int config_set_listen_backlog_size(const char *attrname, char *value, char *errorbuf, int apply);
++int config_set_ignore_time_skew(const char *attrname, char *value, char *errorbuf, int apply);
+ 
+ #if !defined(_WIN32) && !defined(AIX)
+ int config_set_maxdescriptors( const char *attrname, char *value, char *errorbuf, int apply );
+@@ -548,6 +549,7 @@ int config_get_disk_grace_period();
+ int config_get_disk_logging_critical();
+ int config_get_sasl_maxbufsize();
+ int config_get_listen_backlog_size(void);
++int config_get_ignore_time_skew();
+ 
+ int is_abspath(const char *);
+ char* rel2abspath( char * );
+diff --git a/ldap/servers/slapd/slap.h b/ldap/servers/slapd/slap.h
+index eaa1fee..4724f27 100644
+--- a/ldap/servers/slapd/slap.h
++++ b/ldap/servers/slapd/slap.h
+@@ -2006,6 +2006,7 @@ typedef struct _slapdEntryPoints {
+ #define CONFIG_DISK_LOGGING_CRITICAL "nsslapd-disk-monitoring-logging-critical"
+ #define CONFIG_SASL_MAXBUFSIZE "nsslapd-sasl-max-buffer-size"
+ #define CONFIG_LISTEN_BACKLOG_SIZE	"nsslapd-listen-backlog-size"
++#define CONFIG_IGNORE_TIME_SKEW "nsslapd-ignore-time-skew"
+ 
+ /*
+  * Define the backlog number for use in listen() call.
+@@ -2250,6 +2251,7 @@ typedef struct _slapdFrontendConfig {
+   PRUint64 disk_threshold;
+   int disk_grace_period;
+   int disk_logging_critical;
++  int ignore_time_skew;
+ } slapdFrontendConfig_t;
+ 
+ /* possible values for slapdFrontendConfig_t.schemareplace */
+-- 
+1.8.1.4
+

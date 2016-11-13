@@ -1,0 +1,303 @@
+From cb1ef86c225632f7ac2d267a5e3687b156ffc3bf Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Fri, 21 Mar 2014 14:21:13 -0700
+Subject: [PATCH 190/225] Ticket #47748 - Simultaneous adding a user and
+ binding as the user could fail in the password policy check
+
+Bug description: In do_bind, bind_target_entry is retrieved from the
+DB or the entry cache.  There was a small window that the entry failed
+to retrieve from there but the bind procedure in the backend (be_bind)
+succeeds.  In the case, NULL bind_target_entry is passed to the Pass-
+word Policy check and it fails.
+
+Fix description: If be_bind returns SUCCESS and bind_target_entry is
+NULL, retrieve bind_target_entry agian, which is guaranteed since the
+entry was retrieved in the backend and placed in the entry cache.
+
+https://fedorahosted.org/389/ticket/47748
+
+Reviewed by rmeggins@redhat.com (Thank you, Rich!!)
+(cherry picked from commit 4fc53e1a63222d0ff67c30a59f2cff4b535f90a8)
+(cherry picked from commit f8f063c3fb2c7642506cbad923c71972f78edac2)
+(cherry picked from commit feed9ba773766ade744ca4d45aca46c91d4b7f4f)
+(cherry picked from commit f9b2bec732645bf0d219e790448b191c4652858e)
+---
+ ldap/servers/slapd/bind.c    | 105 ++++++++++++++++++++++++++-----------------
+ ldap/servers/slapd/entry.c   |  18 ++++----
+ ldap/servers/slapd/pw_mgmt.c |   3 ++
+ 3 files changed, 75 insertions(+), 51 deletions(-)
+
+diff --git a/ldap/servers/slapd/bind.c b/ldap/servers/slapd/bind.c
+index ec874cc..97b236e 100644
+--- a/ldap/servers/slapd/bind.c
++++ b/ldap/servers/slapd/bind.c
+@@ -429,6 +429,7 @@ do_bind( Slapi_PBlock *pb )
+         if (!strcasecmp (saslmech, LDAP_SASL_EXTERNAL)) {
+             /* call preop plugins */
+             if (plugin_call_plugins( pb, SLAPI_PLUGIN_PRE_BIND_FN ) != 0){
++                send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, "", 0, NULL);
+                 goto free_and_return;
+             }
+ 
+@@ -474,10 +475,10 @@ do_bind( Slapi_PBlock *pb )
+                 goto free_and_return;
+             }
+ 
+-            if (!isroot ) {
++            if (!isroot) {
+                 /* check if the account is locked */
+                 bind_target_entry = get_entry(pb, pb->pb_conn->c_external_dn);
+-                if ( bind_target_entry != NULL && slapi_check_account_lock(pb, bind_target_entry,
++                if ( bind_target_entry && slapi_check_account_lock(pb, bind_target_entry,
+                      pw_response_requested, 1 /*check password policy*/, 1 /*send ldap result*/) == 1) {
+                     /* call postop plugins */
+                     plugin_call_plugins( pb, SLAPI_PLUGIN_POST_BIND_FN );
+@@ -553,6 +554,8 @@ do_bind( Slapi_PBlock *pb )
+ 
+                 /* call postop plugins */
+                 plugin_call_plugins( pb, SLAPI_PLUGIN_POST_BIND_FN );
++            } else {
++                send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, "", 0, NULL);
+             }
+             goto free_and_return;
+         /* Check if unauthenticated binds are allowed. */
+@@ -651,7 +654,7 @@ do_bind( Slapi_PBlock *pb )
+                 bind_credentials_set( pb->pb_conn, SLAPD_AUTH_SIMPLE, slapi_ch_strdup(slapi_sdn_get_ndn(sdn)),
+                                       NULL, NULL, NULL , NULL);
+             } else {
+-            	/*
++                /*
+                  *  right dn, wrong passwd - reject with invalid credentials
+                  */
+                 send_ldap_result( pb, LDAP_INVALID_CREDENTIALS, NULL, NULL, 0, NULL );
+@@ -675,6 +678,8 @@ do_bind( Slapi_PBlock *pb )
+ 
+             /* call postop plugins */
+             plugin_call_plugins( pb, SLAPI_PLUGIN_POST_BIND_FN );
++        } else {
++            send_ldap_result(pb, LDAP_OPERATIONS_ERROR, NULL, "", 0, NULL);
+         }
+         goto free_and_return;
+     }
+@@ -733,9 +738,10 @@ do_bind( Slapi_PBlock *pb )
+                    (rc == SLAPI_BIND_ANONYMOUS))) ) {
+                 long t;
+                 char* authtype = NULL;
+-
+-                if(auto_bind)
++                /* rc is SLAPI_BIND_SUCCESS or SLAPI_BIND_ANONYMOUS */
++                if(auto_bind) {
+                     rc = SLAPI_BIND_SUCCESS;
++                }
+ 
+                 switch ( method ) {
+                 case LDAP_AUTH_SIMPLE:
+@@ -755,53 +761,68 @@ do_bind( Slapi_PBlock *pb )
+                     /* authtype = SLAPD_AUTH_SASL && saslmech: */
+                     PR_snprintf(authtypebuf, sizeof(authtypebuf), "%s%s", SLAPD_AUTH_SASL, saslmech);
+                     authtype = authtypebuf;
+-                break;
+-                default: /* ??? */
++                    break;
++                default:
+                     break;
+                 }
+ 
+                 if ( rc == SLAPI_BIND_SUCCESS ) {
+-                    if(!auto_bind)
+-                        bind_credentials_set( pb->pb_conn,
+-                                          authtype, slapi_ch_strdup(
+-                                              slapi_sdn_get_ndn(sdn)),
+-                                          NULL, NULL, NULL, bind_target_entry );
+-                    if ( auth_response_requested ) {
+-                        slapi_add_auth_response_control( pb,
+-                                                   slapi_sdn_get_ndn(sdn));
++                    if (!auto_bind) {
++                        /* 
++                         * There could be a race that bind_target_entry was not added 
++                         * when bind_target_entry was retrieved before be_bind, but it
++                         * was in be_bind.  Since be_bind returned SLAPI_BIND_SUCCESS,
++                         * the entry is in the DS.  So, we need to retrieve it once more.
++                         */
++                        if (!bind_target_entry) {
++                            bind_target_entry = get_entry(pb, slapi_sdn_get_ndn(sdn));
++                            if (bind_target_entry) {
++                                rc = slapi_check_account_lock(pb, bind_target_entry,
++                                                              pw_response_requested, 1, 1);
++                                if (1 == rc) { /* account is locked */
++                                    goto account_locked;
++                                }
++                            } else {
++                                send_ldap_result(pb, LDAP_NO_SUCH_OBJECT, NULL, "", 0, NULL);
++                                goto free_and_return;
++                            }
++                        }
++                        bind_credentials_set(pb->pb_conn, authtype,
++                                             slapi_ch_strdup(slapi_sdn_get_ndn(sdn)),
++                                             NULL, NULL, NULL, bind_target_entry);
++                        if (!slapi_be_is_flag_set(be, SLAPI_BE_FLAG_REMOTE_DATA)) {
++                            /* check if need new password before sending 
++                               the bind success result */
++                            rc = need_new_pw(pb, &t, bind_target_entry, pw_response_requested);
++                            switch (rc) {
++                            case 1:
++                                (void)slapi_add_pwd_control(pb, LDAP_CONTROL_PWEXPIRED, 0);
++                                break;
++                            case 2:
++                                (void)slapi_add_pwd_control(pb, LDAP_CONTROL_PWEXPIRING, t);
++                                break;
++                            default:
++                                break;
++                            }
++                        }
+                     }
++                    if (auth_response_requested) {
++                        slapi_add_auth_response_control(pb, slapi_sdn_get_ndn(sdn));
++                    }
++                    if (-1 == rc) {
++                        /* neeed_new_pw failed; need_new_pw already send_ldap_result in it. */
++                        goto free_and_return;
++                    } 
+                 } else {	/* anonymous */
+                     /* set bind creds here so anonymous limits are set */
+-                    bind_credentials_set( pb->pb_conn, authtype, NULL,
+-                                          NULL, NULL, NULL, NULL );
++                    bind_credentials_set(pb->pb_conn, authtype, NULL, NULL, NULL, NULL, NULL);
+ 
+                     if ( auth_response_requested ) {
+-                        slapi_add_auth_response_control( pb,
+-                                                   "" );
++                        slapi_add_auth_response_control(pb, "");
+                     }
+                 }
+-
+-                if ( 0 == auto_bind && (rc != SLAPI_BIND_ANONYMOUS) &&
+-                     ! slapi_be_is_flag_set(be, SLAPI_BE_FLAG_REMOTE_DATA)) {
+-                    /* check if need new password before sending 
+-                       the bind success result */
+-                    switch ( need_new_pw (pb, &t, bind_target_entry, pw_response_requested )) {
+-                    case 1:
+-                        (void)slapi_add_pwd_control ( pb, 
+-                                                LDAP_CONTROL_PWEXPIRED, 0);
+-                        break;
+-                    case 2:
+-                        (void)slapi_add_pwd_control ( pb, 
+-                                                LDAP_CONTROL_PWEXPIRING, t);
+-                        break;
+-                    case -1: 
+-                        goto free_and_return;
+-                    default:
+-                        break;
+-                    } 
+-                } /* end if */
+-            }else{
+-                
++            } else {
++account_locked:                
+                 if(cred.bv_len == 0) {
+                     /* its an UnAuthenticated Bind, DN specified but no pw */
+                     slapi_counter_increment(g_get_global_snmp_vars()->ops_tbl.dsUnAuthBinds);
+@@ -837,7 +858,7 @@ do_bind( Slapi_PBlock *pb )
+                           "Function not implemented", 0, NULL );
+     }
+ 
+- free_and_return:;
++free_and_return:;
+     if (be)
+         slapi_be_Unlock(be);
+     slapi_pblock_get(pb, SLAPI_BIND_TARGET_SDN, &sdn);
+diff --git a/ldap/servers/slapd/entry.c b/ldap/servers/slapd/entry.c
+index 04bac0d..d9226af 100644
+--- a/ldap/servers/slapd/entry.c
++++ b/ldap/servers/slapd/entry.c
+@@ -2654,8 +2654,8 @@ slapi_entry_attr_get_charray( const Slapi_Entry* e, const char *type)
+ char *
+ slapi_entry_attr_get_charptr( const Slapi_Entry* e, const char *type)
+ {
+-    char *p= NULL;
+-    Slapi_Attr* attr;
++	char *p= NULL;
++	Slapi_Attr* attr = NULL;
+ 	slapi_entry_attr_find(e, type, &attr);
+ 	if(attr!=NULL)
+ 	{
+@@ -2674,7 +2674,7 @@ int
+ slapi_entry_attr_get_int( const Slapi_Entry* e, const char *type)
+ {
+     int r= 0;
+-    Slapi_Attr* attr;
++    Slapi_Attr* attr = NULL;
+ 	slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+@@ -2689,7 +2689,7 @@ unsigned int
+ slapi_entry_attr_get_uint( const Slapi_Entry* e, const char *type)
+ {
+     unsigned int r= 0;
+-    Slapi_Attr* attr;
++    Slapi_Attr* attr = NULL;
+ 	slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+@@ -2704,7 +2704,7 @@ long
+ slapi_entry_attr_get_long( const Slapi_Entry* e, const char *type)
+ {
+     long r = 0;
+-    Slapi_Attr* attr;
++    Slapi_Attr* attr = NULL;
+ 	slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+@@ -2719,7 +2719,7 @@ unsigned long
+ slapi_entry_attr_get_ulong( const Slapi_Entry* e, const char *type)
+ {
+     unsigned long r = 0;
+-    Slapi_Attr* attr;
++    Slapi_Attr* attr = NULL;
+ 	slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+@@ -2734,7 +2734,7 @@ long long
+ slapi_entry_attr_get_longlong( const Slapi_Entry* e, const char *type)
+ {
+     long long r = 0;
+-    Slapi_Attr* attr;
++    Slapi_Attr* attr = NULL;
+     slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+@@ -2749,7 +2749,7 @@ unsigned long long
+ slapi_entry_attr_get_ulonglong( const Slapi_Entry* e, const char *type)
+ {
+     unsigned long long r = 0;
+-    Slapi_Attr* attr;
++    Slapi_Attr* attr = NULL;
+     slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+@@ -2764,7 +2764,7 @@ PRBool
+ slapi_entry_attr_get_bool( const Slapi_Entry* e, const char *type)
+ {
+     PRBool r = PR_FALSE; /* default if no attr */
+-    Slapi_Attr* attr;
++	Slapi_Attr* attr = NULL;
+ 	slapi_entry_attr_find(e, type, &attr);
+     if (attr!=NULL)
+     {
+diff --git a/ldap/servers/slapd/pw_mgmt.c b/ldap/servers/slapd/pw_mgmt.c
+index f173128..7a8d390 100644
+--- a/ldap/servers/slapd/pw_mgmt.c
++++ b/ldap/servers/slapd/pw_mgmt.c
+@@ -68,6 +68,9 @@ need_new_pw( Slapi_PBlock *pb, long *t, Slapi_Entry *e, int pwresponse_req )
+ 	int	pwdGraceUserTime = 0;
+ 	char graceUserTime[8];
+ 
++	if (NULL == e) {
++		return (-1);
++	}
+ 	slapi_mods_init (&smods, 0);
+ 	sdn = slapi_entry_get_sdn_const( e );
+ 	dn = slapi_entry_get_ndn( e );
+-- 
+1.8.1.4
+

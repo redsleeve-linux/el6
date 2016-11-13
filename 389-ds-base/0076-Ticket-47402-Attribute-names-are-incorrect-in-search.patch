@@ -1,0 +1,52 @@
+From 336aedd43f38447e8b9868d2789cf2b083b88894 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Thu, 20 Jun 2013 14:05:35 -0700
+Subject: [PATCH 76/99] Ticket #47402 - Attribute names are incorrect in search
+ results
+
+Bug Description: Attribute list given by a client to ldapsearch
+is first copied to op->o_searchattrs to respect the client input.
+Then the attribute types are normalized and if the list contains
+any forbidden attributes, they are removed from the list.  When
+the search result is returned, the internal normalized attribute
+types are replaced with the original input op->o_searchattrs,
+respectively. Since forbidden attributes are in op->o_searchattrs
+but not in the internal attribute list, wrong type from copy is
+associated to the value and returned to the client.
+
+Fix Description: This patch removes the forbidden attribute
+before copying the original attribute list to op->o_searchattrs.
+
+https://fedorahosted.org/389/ticket/47402
+
+Reviewed by Nathan (Thank you!!)
+(cherry picked from commit 29236cd1000f5f9391db4a39511603b8bed707f2)
+---
+ ldap/servers/slapd/search.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/search.c b/ldap/servers/slapd/search.c
+index 7719727..1a824b2 100644
+--- a/ldap/servers/slapd/search.c
++++ b/ldap/servers/slapd/search.c
+@@ -329,6 +329,8 @@ do_search( Slapi_PBlock *pb )
+ 			gerattrs[gerattridx] = NULL;
+ 		}
+ 
++		/* Set attrs to SLAPI_SEARCH_ATTRS once to get rid of the forbidden attrs */
++		slapi_pblock_set( pb, SLAPI_SEARCH_ATTRS, attrs );
+ 		operation->o_searchattrs = cool_charray_dup( attrs );
+ 		for ( i = 0; attrs[i] != NULL; i++ ) {
+ 			char	*type;
+@@ -338,7 +340,7 @@ do_search( Slapi_PBlock *pb )
+ 			attrs[i] = type;
+ 		}
+ 	}
+-   if ( slapd_ldap_debug & LDAP_DEBUG_ARGS ) {
++	if ( slapd_ldap_debug & LDAP_DEBUG_ARGS ) {
+ 		char abuf[ 1024 ], *astr;
+ 
+ 		if ( NULL == attrs ) {
+-- 
+1.8.1.4
+

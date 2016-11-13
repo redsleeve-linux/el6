@@ -1,0 +1,69 @@
+From 9008f4ff5ca727a9ab712b5d838000f129a08180 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 5 Aug 2014 10:53:03 -0400
+Subject: [PATCH 238/243] Ticket 47862 - Repl-monitor.pl ignores the provided
+ connection parameters
+
+Bug Description:  The orignal fix for ticket 47538 was not correctly
+                  ported to earlier branches (1.3.2. and down)
+
+Fix Description:  Added the missing "set_server_params" function.
+
+https://fedorahosted.org/389/ticket/47862
+
+Reviewed by: nhosoi(Thanks!)
+
+(cherry picked from commit 7c5d8f2d31d804d516f0ff1cc85d381303582a2d)
+(cherry picked from commit c6ad00b236e748470345726dfc18dc5e240159f8)
+---
+ ldap/admin/src/scripts/repl-monitor.pl.in | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/ldap/admin/src/scripts/repl-monitor.pl.in b/ldap/admin/src/scripts/repl-monitor.pl.in
+index 45d58a1..9107c2d 100755
+--- a/ldap/admin/src/scripts/repl-monitor.pl.in
++++ b/ldap/admin/src/scripts/repl-monitor.pl.in
+@@ -281,6 +281,7 @@ $prompt = "";
+ 
+ 	# Start with the given host and port
+ 	# The index names in %ld are defined in Mozilla::LDAP::Utils::ldapArgs()
++	&set_server_params();
+ 	&add_server ("$ld{host}:$ld{port}:$ld{bind}:$ld{pswd}:$ld{cert}");
+ 
+ 	$serveridx = 0;
+@@ -325,6 +326,32 @@ sub validateArgs
+ 	return $rc;
+ }
+ 
++sub set_server_params
++{
++    my ($host, $port, $binddn, $bindpwd, $bindcert);
++    
++    ($host, $port, $binddn, $bindpwd, $bindcert) = split (/:/, $allconnections[0]);
++    if($opt_p && $opt_p ne ""){
++        $ld{port} = $opt_p
++    } elsif(!$port || $port eq ""){
++        $ld{port} = "389";
++    } else {
++        $ld{port} = $port;
++    }
++    if($host && $host ne ""){
++        $ld{host} = $host;
++    }
++    if($binddn){
++        $ld{bind} = $binddn;
++    }
++    if($bindpwd){
++        $ld{pswd} = $bindpwd;
++    }
++    if($bindcert){
++        $ld{cert} = $bindcert;
++    }
++}
++
+ sub read_cfg_file
+ {
+ 	($fn) = @_;
+-- 
+1.8.1.4
+

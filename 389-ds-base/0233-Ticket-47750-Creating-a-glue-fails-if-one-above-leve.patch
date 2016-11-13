@@ -1,0 +1,37 @@
+From e18869e1e0a69005912b9609dab9ed9a0e106844 Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@redhat.com>
+Date: Mon, 30 Jun 2014 11:27:15 -0700
+Subject: [PATCH 233/234] Ticket #47750 - Creating a glue fails if one above
+ level is a conflict or missing
+
+Description: This commit accidentally removed the code to decrementing
+the reference count for the backend instance.
+  Commit: 160cb3f686e433c01532d28770b2977ec957e73e
+  Ticket #47750 - Creating a glue fails if one above level is a conflict or missing;
+Thanks to mreynolds@redhat.com for finding this out.
+(cherry picked from commit 788a48fa98bb33a6601d7a198aa63b46d12ad78d)
+(cherry picked from commit dfbc46a8574fdb5a2aef5a2ce1ea48400ba263aa)
+(cherry picked from commit f18411d98a441f26f1ef2246b62e84b72ce39ec4)
+(cherry picked from commit 30f1ba8154a4034137c3640007ee35cdb65131dd)
+---
+ ldap/servers/slapd/back-ldbm/ldbm_delete.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/back-ldbm/ldbm_delete.c b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+index 32feeb1..1d2cbc3 100644
+--- a/ldap/servers/slapd/back-ldbm/ldbm_delete.c
++++ b/ldap/servers/slapd/back-ldbm/ldbm_delete.c
+@@ -1325,7 +1325,9 @@ common_return:
+ 	if (!delete_tombstone_entry) {
+ 		plugin_call_plugins (pb, SLAPI_PLUGIN_BE_POST_DELETE_FN);
+ 	}
+-
++	if (inst && inst->inst_ref_count) { 
++		slapi_counter_decrement(inst->inst_ref_count); 
++	}
+ 	if (ruv_c_init) {
+ 		modify_term(&ruv_c, be);
+ 	}
+-- 
+1.8.1.4
+

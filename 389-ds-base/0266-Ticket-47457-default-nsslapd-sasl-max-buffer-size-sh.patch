@@ -1,0 +1,48 @@
+From bddcaeebd7e8745e0bcecfbb050eefa00e20ddde Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Wed, 27 Nov 2013 14:59:14 -0500
+Subject: [PATCH 266/267] Ticket 47457 - default nsslapd-sasl-max-buffer-size
+ should be 2MB
+
+Description:  Increase the default max buffer size to 2mb from 64k.
+
+https://fedorahosted.org/389/ticket/47457
+
+Reviewed by: richm(Thanks!)
+
+(cherry picked from commit 846447c62e3ad2150b054c87c96e797dc1d803f3)
+(cherry picked from commit c65fcdcef8d277273d85a00835d063eeaa22123b)
+(cherry picked from commit 819467e9ab2efc4acaece6f52a733b5241fb042b)
+---
+ ldap/servers/slapd/libglobs.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/ldap/servers/slapd/libglobs.c b/ldap/servers/slapd/libglobs.c
+index ad02a00..b2cb8e2 100644
+--- a/ldap/servers/slapd/libglobs.c
++++ b/ldap/servers/slapd/libglobs.c
+@@ -182,6 +182,9 @@ static int config_set_schemareplace ( const char *attrname, char *value,
+ #define DEFAULT_PW_RESETFAILURECOUNT "600"
+ #define DEFAULT_PW_LOCKDURATION "3600"
+ #define DEFAULT_NDN_SIZE "20971520"
++#define DEFAULT_MAXBERSIZE 2097152
++#define DEFAULT_SASL_MAXBUFSIZE "2097152"
++#define SLAPD_DEFAULT_SASL_MAXBUFSIZE 2097152
+ #ifdef MEMPOOL_EXPERIMENTAL
+ #define DEFAULT_MEMPOOL_MAXFREELIST "1024"
+ #endif
+@@ -5385,9 +5388,9 @@ config_get_maxbersize()
+ 
+     maxbersize = slapdFrontendConfig->maxbersize;
+     if(maxbersize==0)
+-        maxbersize= 2 * 1024 * 1024; /* Default: 2Mb */
+-    return maxbersize;
++        maxbersize = DEFAULT_MAXBERSIZE;
+ 
++    return maxbersize;
+ }
+ 
+ int
+-- 
+1.9.3
+

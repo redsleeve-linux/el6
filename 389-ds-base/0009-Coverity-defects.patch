@@ -1,0 +1,34 @@
+From c970af0ea2da634d5ee7562047715c94a4ab5c4e Mon Sep 17 00:00:00 2001
+From: Noriko Hosoi <nhosoi@totoro.usersys.redhat.com>
+Date: Fri, 26 Oct 2012 18:18:15 -0700
+Subject: [PATCH 09/10] Coverity defects
+
+History:
+The commit b9eeb2e1a8e688dfec753e8965d0e5aeb119e638 for Ticket #481
+"expand nested posix groups" introduced 4 coverity defects.  Commit for
+the fixing patch e9941a2915ac848abe9a4afe802d0432aa0c354a failed to solve
+13102: Resource leak.
+
+Fix Description: This patch explicitly calls slapi_valueset_free for
+the leak reported object muid_old_vs.
+(cherry picked from commit 544f027193139a109aeb14145ae1d77c4bdcc618)
+(cherry picked from commit 55997a627ecf155499621b17eb7e118787536765)
+---
+ .../plugins/posix-winsync/posix-group-func.c       |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/ldap/servers/plugins/posix-winsync/posix-group-func.c b/ldap/servers/plugins/posix-winsync/posix-group-func.c
+index 9ad636f..60528f5 100644
+--- a/ldap/servers/plugins/posix-winsync/posix-group-func.c
++++ b/ldap/servers/plugins/posix-winsync/posix-group-func.c
+@@ -497,6 +497,7 @@ propogateMembershipUpward(Slapi_Entry *entry, Slapi_ValueSet *muid_vs, int depth
+                     slapi_valueset_add_value(muid_upward_vs, v);
+                 }
+             }
++            slapi_valueset_free(muid_old_vs);
+         }
+ 
+         /* Update this group's membership */
+-- 
+1.7.1
+
