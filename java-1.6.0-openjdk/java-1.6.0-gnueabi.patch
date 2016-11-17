@@ -1,0 +1,48 @@
+diff -ruN icedtea6-1.13.7-orig/acinclude.m4 icedtea6-1.13.7/acinclude.m4
+--- icedtea6-1.13.7-orig/acinclude.m4	2015-04-10 18:53:41.339878270 +0200
++++ icedtea6-1.13.10/acinclude.m4	2015-05-24 12:59:56.820694842 +0200
+@@ -1545,7 +1545,7 @@
+     ENABLE_SYSTEM_LCMS="${enableval}"
+   ],
+   [
+-    if test x"${ENABLE_LCMS2}" = "xyes" -a x"${target_os}" = "xlinux-gnu" ; then
++    if test x"${ENABLE_LCMS2}" = "xyes" -a x"${target_os}" = "xlinux-gnueabi" ; then
+       ENABLE_SYSTEM_LCMS="yes" ;
+     else
+       ENABLE_SYSTEM_LCMS="no" ;
+@@ -1575,7 +1575,7 @@
+     ENABLE_SYSTEM_ZLIB="${enableval}"
+   ],
+   [
+-    if test x"${target_os}" = "xlinux-gnu"; then
++    if test x"${target_os}" = "xlinux-gnueabi"; then
+       ENABLE_SYSTEM_ZLIB="yes" ;
+     else
+       ENABLE_SYSTEM_ZLIB="no" ;
+@@ -1606,7 +1606,7 @@
+     ENABLE_SYSTEM_JPEG="${enableval}"
+   ],
+   [
+-    if test x"${target_os}" = "xlinux-gnu"; then
++    if test x"${target_os}" = "xlinux-gnueabi"; then
+       ENABLE_SYSTEM_JPEG="yes" ;
+     else
+       ENABLE_SYSTEM_JPEG="no" ;
+@@ -1635,7 +1635,7 @@
+     ENABLE_SYSTEM_PNG="${enableval}"
+   ],
+   [
+-    if test x"${target_os}" = "xlinux-gnu"; then
++    if test x"${target_os}" = "xlinux-gnueabi"; then
+       ENABLE_SYSTEM_PNG="yes" ;
+     else
+       ENABLE_SYSTEM_PNG="no" ;
+@@ -1665,7 +1665,7 @@
+     ENABLE_SYSTEM_GIF="${enableval}"
+   ],
+   [
+-    if test x"${target_os}" = "xlinux-gnu"; then
++    if test x"${target_os}" = "xlinux-gnueabi"; then
+       ENABLE_SYSTEM_GIF="yes" ;
+     else
+       ENABLE_SYSTEM_GIF="no" ;

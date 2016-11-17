@@ -1,0 +1,17 @@
+--- ./include/linux/types.h.org	2016-09-19 09:40:00.212590813 +0000
++++ ./include/linux/types.h	2016-09-19 09:42:19.365535587 +0000
+@@ -155,11 +155,13 @@
+ #define pgoff_t unsigned long
+ #endif
+ 
++/* Already defined in arch/arm/include/asm/types.h
+ #ifdef CONFIG_ARCH_DMA_ADDR_T_64BIT
+ typedef u64 dma_addr_t;
+ #else
+ typedef u32 dma_addr_t;
+-#endif /* dma_addr_t */
++#endif
++*/
+ 
+ #endif /* __KERNEL__ */
+ 

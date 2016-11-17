@@ -1,0 +1,31 @@
+From 6e6e98746dba7e900f23e92bbb0da01fe7a169da Mon Sep 17 00:00:00 2001
+From: Nikhil Kshirsagar <nkshirsa@redhat.com>
+Date: Fri, 10 Jun 2016 08:50:10 +0530
+Subject: [PATCH] The sys_name array in the mdinfo structure is 20 bytes of
+ storage.
+
+Increasing the size of this array to 32 bytes to handle cases with
+longer device names.
+
+Signed-off-by: Nikhil Kshirsagar <nkshirsa@redhat.com>
+Signed-off-by: Jes Sorensen <Jes.Sorensen@redhat.com>
+---
+ mdadm.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mdadm.h b/mdadm.h
+index 3d6c638..1fd38a3 100755
+--- a/mdadm.h
++++ b/mdadm.h
+@@ -289,7 +289,7 @@ struct mdinfo {
+ 	int container_enough; /* flag external handlers can set to
+ 			       * indicate that subarrays have not enough (-1),
+ 			       * enough to start (0), or all expected disks (1) */
+-	char		sys_name[20];
++	char		sys_name[32];
+ 	struct mdinfo *devs;
+ 	struct mdinfo *next;
+ 
+-- 
+2.5.5
+

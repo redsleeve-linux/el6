@@ -1,0 +1,93 @@
+From 7811a3b2c73758e2f1a239b331ca52378f437df1 Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Tue, 19 Jul 2016 17:13:54 +0200
+Subject: [PATCH] core: apply permissions only on add events
+
+Note that permissions are applied on add events or when udev created new
+device node.
+
+Resolves: #1354690
+---
+ udev/udev-node.c | 40 ++++++++++++++++++++--------------------
+ 1 file changed, 20 insertions(+), 20 deletions(-)
+
+diff --git a/udev/udev-node.c b/udev/udev-node.c
+index da817a6..b4a4671 100644
+--- a/udev/udev-node.c
++++ b/udev/udev-node.c
+@@ -39,6 +39,7 @@ int udev_node_mknod(struct udev_device *dev, const char *file, dev_t devnum, mod
+ 	struct udev_list_entry *entry;
+ 	struct stat stats;
+ 	int err = 0;
++	bool new_node = false;
+ 
+ 	if (major(devnum) == 0)
+ 		devnum = udev_device_get_devnum(dev);
+@@ -55,11 +56,6 @@ int udev_node_mknod(struct udev_device *dev, const char *file, dev_t devnum, mod
+ 		if (((stats.st_mode & S_IFMT) == (mode & S_IFMT)) && (stats.st_rdev == devnum)) {
+ 			info(udev, "preserve file '%s', because it has correct dev_t\n", file);
+ 
+-			if (stats.st_mode != mode || stats.st_uid != uid || stats.st_gid != gid)
+-				info(udev, "set permissions %s, %#o, uid=%u, gid=%u\n", file, mode, uid, gid);
+-			else
+-				info(udev, "preserve permissions %s, %#o, uid=%u, gid=%u\n", file, mode, uid, gid);
+-
+ 			/* set selinux file context on add events */
+ 			if (strcmp(udev_device_get_action(dev), "add") == 0)
+ 				udev_selinux_lsetfilecon(udev, file, mode);
+@@ -86,7 +82,7 @@ int udev_node_mknod(struct udev_device *dev, const char *file, dev_t devnum, mod
+ 				unlink(file_tmp);
+ 				goto exit;
+ 			}
+-			info(udev, "set permissions %s, %#o, uid=%u, gid=%u\n", file, mode, uid, gid);
++			new_node = true;
+ 		}
+ 	} else {
+ 		info(udev, "mknod(%s, %#o, (%u,%u))\n", file, mode, major(devnum), minor(devnum));
+@@ -102,25 +98,29 @@ int udev_node_mknod(struct udev_device *dev, const char *file, dev_t devnum, mod
+ 		} while (err == -ENOENT);
+ 		if (err != 0)
+ 			err(udev, "mknod(%s, %#o, (%u,%u) failed: %m\n", file, mode, major(devnum), minor(devnum));
+-		info(udev, "set permissions %s, %#o, uid=%u, gid=%u\n", file, mode, uid, gid);
++		new_node = true;
+ 	}
+ 
+-	chmod(file, mode);
+-	chown(file, uid, gid);
++	if (new_node || (strcmp(udev_device_get_action(dev), "add") == 0)) {
++		info(udev, "set permissions %s, %#o, uid=%u, gid=%u\n", file, mode, uid, gid);
+ 
+-	udev_list_entry_foreach(entry, udev_list_get_entry(seclabel_list)) {
+-		const char *name, *label;
++		chmod(file, mode);
++		chown(file, uid, gid);
+ 
+-		name = udev_list_entry_get_name(entry);
+-		label = udev_list_entry_get_value(entry);
++		udev_list_entry_foreach(entry, udev_list_get_entry(seclabel_list)) {
++			const char *name, *label;
+ 
+-		if (strcmp(name, "selinux") == 0) {
+-			if (label_apply(file, label) < 0)
+-				err(udev, "SECLABEL: failed to set SELinux label '%s'", label);
+-			else
+-				dbg(udev, "SECLABEL: set SELinux label '%s'", label);
+-		} else
+-			err(udev, "SECLABEL: unknown subsystem, ignoring '%s'='%s'", name, label);
++			name = udev_list_entry_get_name(entry);
++			label = udev_list_entry_get_value(entry);
++
++			if (strcmp(name, "selinux") == 0) {
++				if (label_apply(file, label) < 0)
++					err(udev, "SECLABEL: failed to set SELinux label '%s'", label);
++				else
++					dbg(udev, "SECLABEL: set SELinux label '%s'", label);
++			} else
++				err(udev, "SECLABEL: unknown subsystem, ignoring '%s'='%s'", name, label);
++		}
+ 	}
+ 
+ exit:
+-- 
+2.7.4
+

@@ -1,0 +1,10 @@
+--- matplotlib-0.99.1.1/setupext.py.org	2016-09-17 16:47:34.757095994 +0000
++++ matplotlib-0.99.1.1/setupext.py	2016-09-17 16:48:13.094828430 +0000
+@@ -47,6 +47,7 @@
+ 
+ basedir = {
+     'win32'  : ['win32_static',],
++    'linux3' : ['/usr/local', '/usr'],
+     'linux2' : ['/usr/local', '/usr'],
+     'linux'  : ['/usr/local', '/usr',],
+     'cygwin' : ['/usr/local', '/usr',],

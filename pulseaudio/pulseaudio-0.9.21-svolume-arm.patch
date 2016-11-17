@@ -1,0 +1,43 @@
+diff -up pulseaudio-0.9.21/src/pulsecore/svolume_arm.c.kad pulseaudio-0.9.21/src/pulsecore/svolume_arm.c
+--- pulseaudio-0.9.21/src/pulsecore/svolume_arm.c.kad	2010-03-23 21:04:38.000000000 +0200
++++ pulseaudio-0.9.21/src/pulsecore/svolume_arm.c	2010-03-23 21:08:51.000000000 +0200
+@@ -35,7 +35,17 @@
+ #include "sample-util.h"
+ #include "endianmacros.h"
+ 
+-#if defined (__arm__)
++/* Code below is optimized for ARMv6+ */
++#if defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) \
++        || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6Z__) \
++        || defined(__ARM_ARCH_6ZK__) || defined(__ARM_ARCH_6T2__) \
++        || defined(__ARM_ARCH_6M__) \
++	|| defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) \
++        || defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7M__)
++# define __armv6_or_armv7__ 1
++#endif
++
++#if defined (__armv6_or_armv7__)
+ 
+ #define MOD_INC() \
+     " subs  r0, r6, %2              \n\t" \
+@@ -179,11 +189,11 @@ static void run_test (void) {
+ }
+ #endif
+ 
+-#endif /* defined (__arm__) */
++#endif /* defined (__armv6_or_armv7__) */
+ 
+ 
+ void pa_volume_func_init_arm (pa_cpu_arm_flag_t flags) {
+-#if defined (__arm__)
++#if defined (__armv6_or_armv7__)
+     pa_log_info("Initialising ARM optimized functions.");
+ 
+ #ifdef RUN_TEST
+@@ -191,5 +201,5 @@ void pa_volume_func_init_arm (pa_cpu_arm
+ #endif
+ 
+     pa_set_volume_func (PA_SAMPLE_S16NE,     (pa_do_volume_func_t) pa_volume_s16ne_arm);
+-#endif /* defined (__arm__) */
++#endif /* defined (__armv6_or_armv7__) */
+ }

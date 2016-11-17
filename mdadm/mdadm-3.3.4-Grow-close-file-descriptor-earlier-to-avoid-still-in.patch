@@ -1,0 +1,35 @@
+From 10df72a080f71f01553a14ed8112cee6af7912e8 Mon Sep 17 00:00:00 2001
+From: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Date: Wed, 23 Dec 2015 12:57:10 +0100
+Subject: [PATCH] Grow: close file descriptor earlier to avoid "still in use"
+ when stopping
+
+Close fd2 as soon as it is no longer needed, before calling
+Grow_continue(). Otherwise, we won't be able to stop an array with
+external metadata during reshape, because mdadm running in background
+will be keeping it open.
+
+Signed-off-by: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Signed-off-by: Pawel Baldysiak <pawel.baldysiak@intel.com>
+Signed-off-by: NeilBrown <neilb@suse.com>
+---
+ Grow.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Grow.c b/Grow.c
+index 89e4c34..bbdd46c 100755
+--- a/Grow.c
++++ b/Grow.c
+@@ -4885,6 +4885,9 @@ int Grow_continue_command(char *devname, int fd,
+ 
+ 		sysfs_init(content, fd2, mdstat->devnm);
+ 
++		close(fd2);
++		fd2 = -1;
++
+ 		/* start mdmon in case it is not running
+ 		 */
+ 		if (!mdmon_running(container))
+-- 
+2.5.5
+

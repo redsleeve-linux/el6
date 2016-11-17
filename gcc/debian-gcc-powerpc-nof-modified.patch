@@ -1,0 +1,15 @@
+# DP: Don't build nof multlib on powerpc.
+
+--- a/src/gcc/config/rs6000/t-linux64~	2010-04-05 21:47:52.681086416 +0000
++++ b/src/gcc/config/rs6000/t-linux64	2010-04-05 21:51:34.531670412 +0000
+@@ -19,8 +19,8 @@
+ MULTILIB_EXTRA_OPTS     = fPIC mstrict-align
+ MULTILIB_EXCEPTIONS     = 
+ MULTILIB_EXCLUSIONS     = 
+-MULTILIB_OSDIRNAMES	= ../lib64:powerpc64-linux-gnu $(if $(wildcard $(shell echo $(SYSTEM_HEADER_DIR))/../../usr/lib32),../lib32,../lib):powerpc-linux-gnu nof
+-MULTILIB_MATCHES        = 
++MULTILIB_OSDIRNAMES	= ../lib64:powerpc64-linux-gnu $(if $(wildcard $(shell echo $(SYSTEM_HEADER_DIR))/../../usr/lib32),../lib32,../lib):powerpc-linux-gnu
++MULTILIB_MATCHES        = $(MULTILIB_MATCHES_FLOAT) 
+ 
+ softfp_wrap_start := '\#ifndef __powerpc64__'
+ softfp_wrap_end := '\#endif'

@@ -1,0 +1,27 @@
+# HG changeset patch
+# User xuelei
+# Date 1314062503 25200
+#      Mon Aug 22 18:21:43 2011 -0700
+# Node ID 048f6b9603cfcdd204b540a27fad8b7fc492adc2
+# Parent  802c570861cbe03be84aba444399d81a57e00b4a
+7081817: test/sun/security/provider/certpath/X509CertPath/IllegalCertiticates.java failing
+Reviewed-by: alanb, weijun
+
+diff --git a/src/share/classes/sun/security/provider/certpath/X509CertPath.java b/src/share/classes/sun/security/provider/certpath/X509CertPath.java
+--- openjdk/jdk/src/share/classes/sun/security/provider/certpath/X509CertPath.java
++++ openjdk/jdk/src/share/classes/sun/security/provider/certpath/X509CertPath.java
+@@ -105,7 +105,13 @@
+         super("X.509");
+ 
+         // Ensure that the List contains only X509Certificates
+-        for (Certificate obj : certs) {
++        //
++        // Note; The certs parameter is not necessarily to be of Certificate
++        // for some old code. For compatibility, to make sure the exception
++        // is CertificateException, rather than ClassCastException, please
++        // don't use
++        //     for (Certificate obj : certs)
++        for (Object obj : certs) {
+             if (obj instanceof X509Certificate == false) {
+                 throw new CertificateException
+                     ("List is not all X509Certificates: "

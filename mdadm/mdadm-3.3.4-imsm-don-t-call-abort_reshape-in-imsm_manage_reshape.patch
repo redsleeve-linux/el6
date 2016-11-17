@@ -1,0 +1,36 @@
+From 2139b03c2080e6f4e442ff6b7a0f6ffd30decb8b Mon Sep 17 00:00:00 2001
+From: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Date: Mon, 5 Oct 2015 15:18:11 +0200
+Subject: [PATCH] imsm: don't call abort_reshape() in imsm_manage_reshape()
+
+Calling abort_reshape() in imsm_manage_reshape() is unnecessary in case
+of an error because it is handled by reshape_array(). Calling it when
+reshape completes successfully is also unnecessary and leads to a race
+condition:
+- reshape ends
+- mdadm calls abort_reshape() -> sets sync_action to idle
+- MD_RECOVERY_INTR is set and md_reap_sync_thread() does not finish the
+  reshape
+
+Signed-off-by: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Signed-off-by: Konrad Dabrowski <konrad.dabrowski@intel.com>
+Signed-off-by: NeilBrown <neilb@suse.com>
+---
+ super-intel.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/super-intel.c b/super-intel.c
+index 95a72b6..e609e0c 100644
+--- a/super-intel.c
++++ b/super-intel.c
+@@ -10601,7 +10601,6 @@ static int imsm_manage_reshape(
+ 	ret_val = 1;
+ abort:
+ 	free(buf);
+-	abort_reshape(sra);
+ 
+ 	return ret_val;
+ }
+-- 
+2.5.5
+

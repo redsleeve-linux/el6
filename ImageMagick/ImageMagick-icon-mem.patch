@@ -1,0 +1,12 @@
+diff -up ImageMagick-6.7.2-7/coders/icon.c.icon-mem ImageMagick-6.7.2-7/coders/icon.c
+--- ImageMagick-6.7.2-7/coders/icon.c.icon-mem	2016-06-03 14:55:26.067736083 +0200
++++ ImageMagick-6.7.2-7/coders/icon.c	2016-06-03 15:00:39.010701383 +0200
+@@ -274,6 +274,8 @@ static Image *ReadICONImage(const ImageI
+           Icon image encoded as a compressed PNG image.
+         */
+         length=icon_file.directory[i].size;
++        if (~length < 12)
++          ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");
+         png=(unsigned char *) AcquireQuantumMemory(length+12,sizeof(*png));
+         if (png == (unsigned char *) NULL)
+           ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");

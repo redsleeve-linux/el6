@@ -1,0 +1,36 @@
+From 5ff3a780abeb5e4d97727dd213e5923f55cae28b Mon Sep 17 00:00:00 2001
+From: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Date: Tue, 5 Jan 2016 17:16:15 +0100
+Subject: [PATCH] imsm: use timeout when waiting for reshape progress
+
+Waiting for reshape progress is done by using select() on sync_completed
+to block until an exception condition is signalled on the
+filedescriptor. This happens when the attribute's value is updated by
+the kernel, but if the array is stopped when mdadm is blocked on
+select() this will never happen, because this attribute is then removed
+and apparently the kernel doesn't do sysfs_notify() when removing a
+sysfs attribute. So set a 3 second timeout for the sysfs_wait() call.
+
+Signed-off-by: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Signed-off-by: NeilBrown <neilb@suse.com>
+---
+ super-intel.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/super-intel.c b/super-intel.c
+index b836816..3b3d561 100644
+--- a/super-intel.c
++++ b/super-intel.c
+@@ -10393,7 +10393,8 @@ int wait_for_reshape_imsm(struct mdinfo *sra, int ndata)
+ 
+ 	do {
+ 		char action[20];
+-		sysfs_wait(fd, NULL);
++		int timeout = 3000;
++		sysfs_wait(fd, &timeout);
+ 		if (sysfs_get_str(sra, NULL, "sync_action",
+ 				  action, 20) > 0 &&
+ 				strncmp(action, "reshape", 7) != 0) {
+-- 
+2.5.5
+

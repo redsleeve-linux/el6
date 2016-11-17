@@ -1,0 +1,87 @@
+From 2a26ef3a012cc29623423ca52c1cc8001d847d54 Mon Sep 17 00:00:00 2001
+From: Pino Toscano <toscano.pino@tiscali.it>
+Date: Thu, 17 Jan 2013 21:08:12 +0100
+Subject: [PATCH] Add HAVE_MREMAP for mremap usage
+
+Introduce (only on Linux) and use a HAVE_MREMAP symbol to advertize mremap
+availability.
+
+Move the malloc-sysdep.h include from arena.c to malloc.c, since what is
+provided by malloc-sysdep.h is needed earlier in malloc.c, before the inclusion
+of arena.c.
+---
+ ChangeLog                               |  7 +++++++
+ malloc/arena.c                          |  3 ---
+ malloc/malloc.c                         | 12 ++++--------
+ sysdeps/unix/sysv/linux/malloc-sysdep.h |  2 ++
+ 4 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/malloc/arena.c b/malloc/arena.c
+index 0c77802..7d51a9d 100644
+--- a/malloc/arena.c
++++ b/malloc/arena.c
+@@ -19,9 +19,6 @@
+ 
+ #include <stdbool.h>
+ 
+-/* Get the implementation for check_may_shrink_heap.  */
+-#include <malloc-sysdep.h>
+-
+ /* Compile-time constants.  */
+ 
+ #define HEAP_MIN_SIZE (32*1024)
+diff --git a/malloc/malloc.c b/malloc/malloc.c
+index 597c7b0..b4753e8 100644
+--- a/malloc/malloc.c
++++ b/malloc/malloc.c
+@@ -176,7 +176,7 @@
+     USE_MEMCPY                 1 if HAVE_MEMCPY is defined
+     HAVE_MMAP                  defined as 1
+     MMAP_CLEARS                1
+-    HAVE_MREMAP                0 unless linux defined
++    HAVE_MREMAP                0
+     USE_ARENAS                 the same as HAVE_MMAP
+     malloc_getpagesize         derived from system #includes, or 4096 if not
+     HAVE_USR_INCLUDE_MALLOC_H  NOT defined
+@@ -250,11 +250,13 @@
+ #if __STD_C
+ #include <stddef.h>   /* for size_t */
+ #include <stdlib.h>   /* for getenv(), abort() */
++#include <unistd.h>   /* for __libc_enable_secure */
+ #else
+ #include <sys/types.h>
+ #endif
+ 
+ #include <malloc-machine.h>
++#include <malloc-sysdep.h>
+ 
+ #ifdef _LIBC
+ #ifdef ATOMIC_FASTBINS
+@@ -744,14 +746,9 @@ extern Void_t*     sbrk();
+ */
+ 
+ #ifndef HAVE_MREMAP
+-#ifdef linux
+-#define HAVE_MREMAP 1
+-#else
+ #define HAVE_MREMAP 0
+ #endif
+ 
+-#endif /* HAVE_MMAP */
+-
+ /* Define USE_ARENAS to enable support for multiple `arenas'.  These
+    are allocated using mmap(), are necessary for threads and
+    occasionally useful to overcome address space limitations affecting
+diff --git a/sysdeps/unix/sysv/linux/malloc-sysdep.h b/sysdeps/unix/sysv/linux/malloc-sysdep.h
+index 0a876df..737ca0e 100644
+--- a/sysdeps/unix/sysv/linux/malloc-sysdep.h
++++ b/sysdeps/unix/sysv/linux/malloc-sysdep.h
+@@ -55,3 +55,5 @@ check_may_shrink_heap (void)
+ 
+   return may_shrink_heap;
+ }
++
++#define HAVE_MREMAP 1
+-- 
+1.9.4
+

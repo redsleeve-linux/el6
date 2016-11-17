@@ -1,0 +1,43 @@
+# DP: Retry the build on an ice, save the calling options and preprocessed
+# DP: source when the ice is reproducible.
+
+2004-01-23  Jakub Jelinek  <jakub@redhat.com>
+
+	* system.h (ICE_EXIT_CODE): Define.
+	* gcc.c (execute): Don't free first string early, but at the end
+	of the function.  Call retry_ice if compiler exited with
+	ICE_EXIT_CODE.
+	(retry_ice): New function.
+	* diagnostic.c (diagnostic_count_diagnostic,
+	diagnostic_action_after_output, error_recursion): Exit with
+	ICE_EXIT_CODE instead of FATAL_EXIT_CODE.
+
+---
+ gcc/Makefile.in  |    2 +
+ gcc/diagnostic.c |    2 +-
+ gcc/gcc.c        |  236 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 238 insertions(+), 2 deletions(-)
+
+--- a/src/gcc/Makefile.in
++++ b/src/gcc/Makefile.in
+@@ -182,6 +182,9 @@
+ # mips-tfile.c contains -Wcast-qual warnings.
+ mips-tfile.o-warn = -Wno-error
+
++# gcc-ice-hack
++gcc.o-warn = -Wno-error
++
+ # All warnings have to be shut off in stage1 if the compiler used then
+ # isn't gcc; configure determines that.  WARN_CFLAGS will be either
+ # $(GCC_WARN_CFLAGS), or nothing.
+--- a/src/gcc/diagnostic.c
++++ b/src/gcc/diagnostic.c
+@@ -195,7 +195,7 @@ diagnostic_action_after_output (diagnostic_context *context,
+       fnotice (stderr, "Please submit a full bug report,\n"
+ 	       "with preprocessed source if appropriate.\n"
+ 	       "See %s for instructions.\n", bug_report_url);
+-      exit (ICE_EXIT_CODE);
++      exit (FATAL_EXIT_CODE);
+ 
+     case DK_FATAL:
+       if (context->abort_on_error)

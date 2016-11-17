@@ -1,0 +1,57 @@
+--- java-1.7.0-openjdk.spec	2016-11-17 09:09:05.954527100 +0000
++++ java-1.7.0-openjdk.spec.patched	2016-11-17 09:16:03.387639714 +0000
+@@ -186,9 +186,12 @@
+ # Prevent brp-java-repack-jars from being run.
+ %global __jar_repack 0
+ 
++# Build without Java 1.7.0 requirements
++%global bootstrap 0
++
+ Name:    java-%{javaver}-%{origin}
+ Version: %{javaver}.%{updatever}
+-Release: %{icedtea_version}.1%{?dist}
++Release: %{icedtea_version}.1%{?dist}.0
+ # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons,
+ # and this change was brought into RHEL-4.  java-1.5.0-ibm packages
+ # also included the epoch in their virtual provides.  This created a
+@@ -334,8 +337,10 @@
+ BuildRequires: fontconfig
+ BuildRequires: xorg-x11-fonts-Type1
+ BuildRequires: zlib > 1.2.3-6
++%if !%{bootstrap}
+ # Require a build JDK which has a working jar uf (PR1437 / RH1207129)
+ BuildRequires: java-1.7.0-openjdk-devel >= 1.7.0.111-2.6.7.2
++%endif
+ BuildRequires: fontconfig
+ # Java Access Bridge for GNOME build requirements.
+ BuildRequires: at-spi-devel
+@@ -364,7 +369,7 @@
+ BuildRequires: libffi-devel >= 3.0.10
+ %endif
+ 
+-ExclusiveArch: x86_64 i686 %{ppc64be}
++ExclusiveArch: x86_64 i686 %{ppc64be} %{arm}
+ 
+ # cacerts build requirement.
+ BuildRequires: openssl
+@@ -695,6 +700,9 @@
+   STRIP_POLICY="no_strip" \
+   JAVAC_WARNINGS_FATAL="false" \
+   INSTALL_LOCATION=%{_jvmdir}/%{sdkdir} \
++%ifarch %{arm}
++  ARM32JIT="false" \
++%endif
+   %{debugbuild}
+ 
+ popd >& /dev/null
+@@ -1229,6 +1237,10 @@
+ %doc %{buildoutputdir}/j2sdk-image/jre/LICENSE
+ 
+ %changelog
++* Thu Nov 17 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 1:1.7.0.121-2.6.8.1.0
++- Disabled arm32JIT building
++- Bootstrap building if needed
++
+ * Tue Nov 01 2016 Jiri Vanek <jvanek@redhat.com> - 1:1.7.0.121-2.6.8.1
+ - New variable, @prefix@, needs to be substituted in tapsets (rhbz1371005)
+ - Resolves: rhbz#1381990

@@ -1,0 +1,65 @@
+commit f899ffff367d9bafe2ad447176953128e2e826cf
+Author: Peter Simons <psimons@suse.com>
+Date:   Fri Apr 15 11:56:55 2016 +0200
+
+    Add missing increments of recursion depth counter to XML parser.
+    
+    For https://bugzilla.gnome.org/show_bug.cgi?id=765207
+    CVE-2016-3705
+    The functions xmlParserEntityCheck() and xmlParseAttValueComplex() used to call
+    xmlStringDecodeEntities() in a recursive context without incrementing the
+    'depth' counter in the parser context. Because of that omission, the parser
+    failed to detect attribute recursions in certain documents before running out
+    of stack space.
+
+diff --git a/parser.c b/parser.c
+index aa8b63a..948570f 100644
+--- a/parser.c
++++ b/parser.c
+@@ -138,8 +138,10 @@ xmlParserEntityCheck(xmlParserCtxtPtr ctxt, size_t size,
+ 
+ 	ent->checked = 1;
+ 
++        ++ctxt->depth;
+ 	rep = xmlStringDecodeEntities(ctxt, ent->content,
+ 				  XML_SUBSTITUTE_REF, 0, 0, 0);
++        --ctxt->depth;
+ 
+ 	ent->checked = (ctxt->nbentities - oldnbent + 1) * 2;
+ 	if (rep != NULL) {
+@@ -3786,8 +3788,10 @@ xmlParseEntityValue(xmlParserCtxtPtr ctxt, xmlChar **orig) {
+ 	 * an entity declaration, it is bypassed and left as is.
+ 	 * so XML_SUBSTITUTE_REF is not set here.
+ 	 */
++        ++ctxt->depth;
+ 	ret = xmlStringDecodeEntities(ctxt, buf, XML_SUBSTITUTE_PEREF,
+ 				      0, 0, 0);
++        --ctxt->depth;
+ 	if (orig != NULL)
+ 	    *orig = buf;
+ 	else
+@@ -3912,9 +3916,11 @@ xmlParseAttValueComplex(xmlParserCtxtPtr ctxt, int *attlen, int normalize) {
+ 		} else if ((ent != NULL) && 
+ 		           (ctxt->replaceEntities != 0)) {
+ 		    if (ent->etype != XML_INTERNAL_PREDEFINED_ENTITY) {
++			++ctxt->depth;
+ 			rep = xmlStringDecodeEntities(ctxt, ent->content,
+ 						      XML_SUBSTITUTE_REF,
+ 						      0, 0, 0);
++			--ctxt->depth;
+ 			if (rep != NULL) {
+ 			    current = rep;
+ 			    while (*current != 0) { /* non input consuming */
+@@ -3948,8 +3954,12 @@ xmlParseAttValueComplex(xmlParserCtxtPtr ctxt, int *attlen, int normalize) {
+ 		     */
+ 		    if ((ent->etype != XML_INTERNAL_PREDEFINED_ENTITY) &&
+ 			(ent->content != NULL)) {
++
++			++ctxt->depth;
+ 			rep = xmlStringDecodeEntities(ctxt, ent->content,
+ 						  XML_SUBSTITUTE_REF, 0, 0, 0);
++			--ctxt->depth;
++
+ 			if (rep != NULL) {
+ 			    xmlFree(rep);
+ 			    rep = NULL;

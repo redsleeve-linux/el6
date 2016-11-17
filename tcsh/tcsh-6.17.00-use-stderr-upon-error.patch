@@ -1,0 +1,253 @@
+From 99857125aed3f80a5684b0465678a82c1724cb29 Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Sun, 22 Feb 2015 21:40:14 +0000
+Subject: [PATCH 1/5] PR/291: print job status to stderr
+
+---
+ sh.proc.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/sh.proc.c b/sh.proc.c
+index 0a9ff7d..40bdd93 100644
+--- a/sh.proc.c
++++ b/sh.proc.c
+@@ -986,6 +986,7 @@ pprint(struct process *pp, int flag)
+     tp = pp;
+     status = reason = -1;
+     jobflags = 0;
++    haderr = 1;	/* Print statuc to stderr */
+     do {
+ #ifdef BACKPIPE
+ 	/*
+@@ -1194,6 +1195,7 @@ prcomd:
+ 	    xprintf("       ");
+ 	ptprint(tp);
+     }
++    haderr = 0;
+     return (jobflags);
+ }
+ 
+-- 
+2.5.5
+
+
+From b8a20eaf608a237c71f92e114298e22d72f6d0b8 Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Sun, 3 May 2015 13:53:32 +0000
+Subject: [PATCH 2/5] fix tests to pass for job output going to stderr
+
+---
+ tests/commands.at  | 12 +++++++-----
+ tests/syntax.at    |  5 +++--
+ tests/variables.at |  2 +-
+ 3 files changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/tests/commands.at b/tests/commands.at
+index 9ccdce1..a2ae9d8 100644
+--- a/tests/commands.at
++++ b/tests/commands.at
+@@ -702,9 +702,10 @@ echo fail
+ # onintr - is necessary to keep setintr == 0; should dohup () be checking
+ # something else?
+ AT_CHECK([tcsh -f -c 'onintr -; nohup tcsh -f hup.csh' < /dev/null], ignore,
+-[OK
+-Hangup
+-])
++[[OK
++]],
++[[Hangup]]
++)
+ 
+ # The prefix form requires job control and is not tested
+ 
+@@ -782,8 +783,9 @@ AT_DATA([kill.csh],
+ kill -USR1 $$
+ ]])
+ AT_CHECK([tcsh -f -c 'tcsh -f -i -q < kill.csh'], ignore,
+-[> User signal 1
+-])
++[[> ]],
++[[User signal 1]]
++)
+ 
+ # kill %job, kill -l untested untested
+ 
+diff --git a/tests/syntax.at b/tests/syntax.at
+index 2a2abd0..23fc8d5 100644
+--- a/tests/syntax.at
++++ b/tests/syntax.at
+@@ -28,8 +28,9 @@ AT_CHECK([[tcsh -f -c '(sleep 1; echo async) & echo sync; wait' \
+ [[[1] @&t@
+ sync
+ async
+-[1]    Done                          ( sleep 1; echo async )
+-]])
++]],
++[[[1]    Done                          ( sleep 1; echo async )]]
++)
+ 
+ AT_CLEANUP
+ 
+diff --git a/tests/variables.at b/tests/variables.at
+index 6ec4c4b..7acf88e 100644
+--- a/tests/variables.at
++++ b/tests/variables.at
+@@ -909,7 +909,7 @@ if ( $status > 128 ) echo OK
+ true
+ echo $status
+ ]])
+-AT_CHECK([tcsh -f status.csh | sed 's/Abort (core dumped)/Abort/'], ,
++AT_CHECK([tcsh -f status.csh 2>&1 | sed 's/Abort (core dumped)/Abort/'], ,
+ [0
+ Abort
+ OK
+-- 
+2.5.5
+
+
+From 0c3d1e06e307e4cebb5137af1cbb10398b2f8690 Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Tue, 24 May 2016 15:11:30 +0000
+Subject: [PATCH 3/5] preserve previous value of haderr.
+
+---
+ sh.proc.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/sh.proc.c b/sh.proc.c
+index 40bdd93..27a86ab 100644
+--- a/sh.proc.c
++++ b/sh.proc.c
+@@ -971,6 +971,7 @@ pprint(struct process *pp, int flag)
+     struct process *tp;
+     int     jobflags, pstatus, pcond;
+     const char *format;
++    int ohaderr;
+ 
+ #ifdef BACKPIPE
+     struct process *pipehead = NULL, *pipetail = NULL, *pmarker = NULL;
+@@ -986,6 +987,7 @@ pprint(struct process *pp, int flag)
+     tp = pp;
+     status = reason = -1;
+     jobflags = 0;
++    ohaderr = haderr;
+     haderr = 1;	/* Print statuc to stderr */
+     do {
+ #ifdef BACKPIPE
+@@ -1195,7 +1197,7 @@ prcomd:
+ 	    xprintf("       ");
+ 	ptprint(tp);
+     }
+-    haderr = 0;
++    haderr = ohaderr;
+     return (jobflags);
+ }
+ 
+-- 
+2.5.5
+
+
+From f54c07df5fbbbbe77f19df87cb970fab4a8418da Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Tue, 24 May 2016 17:41:12 +0000
+Subject: [PATCH 4/5] don't print jobs to stderr
+ (paulo.cesar.pereira.de.andrade)
+
+---
+ sh.proc.c |  5 +++--
+ sh.proc.h | 17 +++++++++--------
+ 2 files changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/sh.proc.c b/sh.proc.c
+index 27a86ab..b530fe2 100644
+--- a/sh.proc.c
++++ b/sh.proc.c
+@@ -988,7 +988,8 @@ pprint(struct process *pp, int flag)
+     status = reason = -1;
+     jobflags = 0;
+     ohaderr = haderr;
+-    haderr = 1;	/* Print statuc to stderr */
++    /* Print status to stderr, except for jobs built-in */
++    haderr = !(flag & JOBLIST);
+     do {
+ #ifdef BACKPIPE
+ 	/*
+@@ -1296,7 +1297,7 @@ void
+ dojobs(Char **v, struct command *c)
+ {
+     struct process *pp;
+-    int flag = NUMBER | NAME | REASON;
++    int flag = NUMBER | NAME | REASON | JOBLIST;
+     int     i;
+ 
+     USE(c);
+diff --git a/sh.proc.h b/sh.proc.h
+index 314270b..345bc6a 100644
+--- a/sh.proc.h
++++ b/sh.proc.h
+@@ -105,14 +105,15 @@ struct process {
+ #define PBRACE		(1<<18)	/* Process is {} evaluation */
+ 
+ /* defines for arguments to pprint */
+-#define	NUMBER		01
+-#define	NAME		02
+-#define	REASON		04
+-#define	AMPERSAND	010
+-#define	FANCY		020
+-#define	SHELLDIR	040	/* print shell's dir if not the same */
+-#define	JOBDIR		0100	/* print job's dir if not the same */
+-#define	AREASON		0200
++#define	NUMBER		0x001
++#define	NAME		0x002
++#define	REASON		0x004
++#define	AMPERSAND	0x008
++#define	FANCY		0x010
++#define	SHELLDIR	0x020	/* print shell's dir if not the same */
++#define	JOBDIR		0x040	/* print job's dir if not the same */
++#define	AREASON		0x080
++#define	JOBLIST		0x100
+ 
+ EXTERN struct process proclist IZERO_STRUCT;/* list head of all processes */
+ 
+-- 
+2.5.5
+
+
+From 87548be96f3034c3d78d89bd334fe2d031bae1bc Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Fri, 27 May 2016 18:08:56 +0000
+Subject: [PATCH 5/5] Test that output of the jobs builtin goes to stdout
+ (David Kaspar)
+
+---
+ tests/commands.at | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/tests/commands.at b/tests/commands.at
+index a2ae9d8..795ba5e 100644
+--- a/tests/commands.at
++++ b/tests/commands.at
+@@ -1470,4 +1470,20 @@ OK
+ 
+ AT_CLEANUP
+ 
++AT_SETUP([jobs output])
+ 
++AT_DATA([jobs_stdout.csh],
++[[
++sleep 3 &
++jobs -l > ./stdout
++
++if ( -z ./stdout ) then
++  echo "FAIL: 'jobs' output is not being displayed to stdout!"
++  exit 1
++else
++  exit 0
++endif
++]])
++AT_CHECK([tcsh -f jobs_stdout.csh], 0, [ignore])
++
++AT_CLEANUP
+-- 
+2.5.5
+

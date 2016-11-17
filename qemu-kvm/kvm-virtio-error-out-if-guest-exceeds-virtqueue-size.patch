@@ -1,0 +1,67 @@
+From 03273122a055a22d0e1f733cac7ec3c3daf2fe85 Mon Sep 17 00:00:00 2001
+From: Stefan Hajnoczi <stefanha@redhat.com>
+Date: Mon, 25 Jul 2016 13:47:38 +0200
+Subject: [PATCH] virtio: error out if guest exceeds virtqueue size
+
+RH-Author: Stefan Hajnoczi <stefanha@redhat.com>
+Message-id: <1469454458-14328-2-git-send-email-stefanha@redhat.com>
+Patchwork-id: 71430
+O-Subject: [virt-devel] [RHEL-6.9 EMBARGOED qemu-kvm PATCH 1/1] virtio: error out if guest exceeds virtqueue size
+Bugzilla: 1359724
+RH-Acked-by: Thomas Huth <thuth@redhat.com>
+RH-Acked-by: Maxime Coquelin <maxime.coquelin@redhat.com>
+RH-Acked-by: Laszlo Ersek <lersek@redhat.com>
+
+A broken or malicious guest can submit more requests than the virtqueue
+size permits.
+
+The guest can submit requests without bothering to wait for completion
+and is therefore not bound by virtqueue size.  This requires reusing
+vring descriptors in more than one request, which is incorrect but
+possible.  Processing a request allocates a VirtQueueElement and
+therefore causes unbounded memory allocation controlled by the guest.
+
+Exit with an error if the guest provides more requests than the
+virtqueue size permits.  This bounds memory allocation and makes the
+buggy guest visible to the user.
+
+This patch fixes CVE-2016-5403.
+
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+Signed-off-by: Miroslav Rezanina <mrezanin@redhat.com>
+
+Conflicts:
+
+  hw/virtio.c
+
+  The file is called hw/virtio/virtio.c upstream.  Note that the memory
+  allocation policy is different downstream: the caller owns the
+  VirtQueueElement.  In practice this does not change the impact of the
+  bug since there are code paths where the caller heap allocates the
+  VirtQueueElement and will process more requests than the virtqueue
+  size.
+
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+---
+ hw/virtio.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/hw/virtio.c b/hw/virtio.c
+index eb66eef..4d52086 100644
+--- a/hw/virtio.c
++++ b/hw/virtio.c
+@@ -453,6 +453,11 @@ int virtqueue_pop(VirtQueue *vq, VirtQueueElement *elem)
+ 
+     max = vq->vring.num;
+ 
++    if (vq->inuse >= max) {
++        error_report("Virtqueue size exceeded");
++        exit(1);
++    }
++
+     i = head = virtqueue_get_head(vq, vq->last_avail_idx++);
+     if (vq->vdev->guest_features & (1 << VIRTIO_RING_F_EVENT_IDX)) {
+         vring_avail_event(vq, vring_avail_idx(vq));
+-- 
+1.8.3.1
+

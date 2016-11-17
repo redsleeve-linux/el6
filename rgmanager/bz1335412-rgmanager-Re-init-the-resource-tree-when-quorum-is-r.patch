@@ -1,0 +1,40 @@
+From abd0d212698ca681e42d3d2869fc728d1908f346 Mon Sep 17 00:00:00 2001
+From: Ryan McCabe <rmccabe@redhat.com>
+Date: Wed, 11 May 2016 13:34:48 -0400
+Subject: [PATCH] rgmanager: Re-init the resource tree when quorum is regained
+ and central processing is enabled
+
+When quorum is lost in central processing mode, reinitialize the resource tree.
+
+Resolves: rhbz#1084053
+
+Patch from John Ruemker <jruemker@redhat.com>
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ rgmanager/src/daemons/main.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/rgmanager/src/daemons/main.c b/rgmanager/src/daemons/main.c
+index e55e15e..3679d57 100644
+--- a/rgmanager/src/daemons/main.c
++++ b/rgmanager/src/daemons/main.c
+@@ -140,6 +140,16 @@ membership_update(void)
+ 		rg_unlockall(L_SYS);
+ 		rg_unlockall(L_USER);
+ 		logt_print(LOG_NOTICE, "Quorum Regained\n");
++
++
++		if (central_events_enabled() && !rg_initialized()) {
++			if (init_resource_groups(0, 0) != 0) {
++				logt_print(LOG_ERR,
++				       "#36: Cannot initialize services\n");
++				rg_lockall(L_SYS);
++				exit(1);
++			}
++		}
+ 	}
+ 
+ 	old_membership = member_list();
+-- 
+2.4.11
+

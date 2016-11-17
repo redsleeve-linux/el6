@@ -1,0 +1,23 @@
+# HG changeset patch
+# User igerasim
+# Date 1468169506 -3600
+#      Sun Jul 10 17:51:46 2016 +0100
+# Node ID 5e27ac7f7cbc125d91530f9e49dcdb488eacc78f
+# Parent  8b1a17d4bf3d2a90fafbb1fccc8a6af7c4b38df5
+8147771: Construction of static protection domains under Javax custom policy
+Summary: Changed SubjectDomainCombiner to combine static PD as is even when custom policy is enabled.
+Reviewed-by: valeriep
+
+diff -r 8b1a17d4bf3d -r 5e27ac7f7cbc src/share/classes/javax/security/auth/SubjectDomainCombiner.java
+--- openjdk/jdk/src/share/classes/javax/security/auth/SubjectDomainCombiner.java	Fri Jul 01 04:11:25 2016 +0100
++++ openjdk/jdk/src/share/classes/javax/security/auth/SubjectDomainCombiner.java	Sun Jul 10 17:51:46 2016 +0100
+@@ -246,7 +246,8 @@
+                 if (subjectPd == null) {
+                     if (pdAccess.getStaticPermissionsField(pd)) {
+                         // Need to keep static ProtectionDomain objects static
+-                        subjectPd = pd;
++                        subjectPd = new ProtectionDomain(pd.getCodeSource(),
++                                                pd.getPermissions());
+                     } else {
+                         subjectPd = new ProtectionDomain(pd.getCodeSource(),
+                                                 pd.getPermissions(),

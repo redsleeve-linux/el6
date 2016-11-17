@@ -1,0 +1,11 @@
+--- compat-dapl-1.2.19/dapl/udapl/linux/dapl_osd.h.org	2016-09-21 16:33:20.479662379 +0000
++++ compat-dapl-1.2.19/dapl/udapl/linux/dapl_osd.h	2016-09-21 16:34:20.830264920 +0000
+@@ -49,7 +49,7 @@
+ #error UNDEFINED OS TYPE
+ #endif /* __linux__ */
+ 
+-#if !defined (__i386__) && !defined (__ia64__) && !defined(__x86_64__) && !defined(__PPC__) && !defined(__PPC64__)
++#if !defined (__i386__) && !defined (__ia64__) && !defined(__x86_64__) && !defined(__PPC__) && !defined(__PPC64__) && !defined(__arm__)
+ #error UNDEFINED ARCH
+ #endif
+ 

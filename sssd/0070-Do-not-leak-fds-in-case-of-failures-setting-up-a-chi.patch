@@ -1,0 +1,654 @@
+From 40767832ab77e17746891ba68b458c6d519089c1 Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Thu, 19 May 2016 18:12:17 +0200
+Subject: [PATCH 70/70] Do not leak fds in case of failures setting up a child
+ process
+
+Resolves:
+    https://fedorahosted.org/sssd/ticket/3006
+
+The handling of open pipes in failure cases was suboptimal. Moreover,
+the faulty logic was copied all over the place. This patch introduces
+helper macros to:
+    - initialize the pipe endpoints to -1
+    - close an open pipe fd and set it to -1 afterwards
+    - close both ends unless already closed
+These macros are used in the child handling code.
+
+The patch also uses child_io_destructor in the p11_child code for safer
+fd handling.
+
+Reviewed-by: Petr Cech <pcech@redhat.com>
+---
+ src/providers/ad/ad_gpo.c                | 36 ++++++++++++++------------
+ src/providers/ad/ad_machine_pw_renewal.c | 10 +++++---
+ src/providers/dp_dyndns.c                | 16 ++++++++----
+ src/providers/ipa/ipa_selinux.c          | 27 +++++++++++---------
+ src/providers/krb5/krb5_child_handler.c  | 42 +++++++++++++++---------------
+ src/providers/ldap/sdap_child_helpers.c  | 36 ++++++++++++++------------
+ src/responder/pam/pamsrv_p11.c           | 44 ++++++++++++++++++--------------
+ src/util/util.h                          | 14 ++++++++++
+ 8 files changed, 132 insertions(+), 93 deletions(-)
+
+diff --git a/src/providers/ad/ad_gpo.c b/src/providers/ad/ad_gpo.c
+index 869c0280e9497c7f1c46ac34d4f93fb023eefb56..5969e8442449ec410b4aa6a043f686349b9f2e7b 100644
+--- a/src/providers/ad/ad_gpo.c
++++ b/src/providers/ad/ad_gpo.c
+@@ -4036,8 +4036,7 @@ static void gpo_cse_step(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->io->write_to_child_fd);
+-    state->io->write_to_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->write_to_child_fd);
+ 
+     subreq = read_pipe_send(state, state->ev, state->io->read_from_child_fd);
+ 
+@@ -4067,8 +4066,7 @@ static void gpo_cse_done(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->io->read_from_child_fd);
+-    state->io->read_from_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->read_from_child_fd);
+ 
+     ret = ad_gpo_parse_gpo_child_response(state->buf, state->len,
+                                           &sysvol_gpt_version, &child_result);
+@@ -4110,28 +4108,27 @@ int ad_gpo_process_cse_recv(struct tevent_req *req)
+ static errno_t
+ gpo_fork_child(struct tevent_req *req)
+ {
+-    int pipefd_to_child[2];
+-    int pipefd_from_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
++    int pipefd_from_child[2] = PIPE_INIT;
+     pid_t pid;
+-    int ret;
+-    errno_t err;
++    errno_t ret;
+     struct ad_gpo_process_cse_state *state;
+ 
+     state = tevent_req_data(req, struct ad_gpo_process_cse_state);
+ 
+     ret = pipe(pipefd_from_child);
+     if (ret == -1) {
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "pipe failed [%d][%s].\n", errno, strerror(errno));
+-        return err;
++        goto fail;
+     }
+     ret = pipe(pipefd_to_child);
+     if (ret == -1) {
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "pipe failed [%d][%s].\n", errno, strerror(errno));
+-        return err;
++        goto fail;
+     }
+ 
+     pid = fork();
+@@ -4147,9 +4144,9 @@ gpo_fork_child(struct tevent_req *req)
+     } else if (pid > 0) { /* parent */
+         state->child_pid = pid;
+         state->io->read_from_child_fd = pipefd_from_child[0];
+-        close(pipefd_from_child[1]);
++        PIPE_FD_CLOSE(pipefd_from_child[1]);
+         state->io->write_to_child_fd = pipefd_to_child[1];
+-        close(pipefd_to_child[0]);
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
+         sss_fd_nonblocking(state->io->read_from_child_fd);
+         sss_fd_nonblocking(state->io->write_to_child_fd);
+ 
+@@ -4157,16 +4154,21 @@ gpo_fork_child(struct tevent_req *req)
+         if (ret != EOK) {
+             DEBUG(SSSDBG_CRIT_FAILURE,
+                   "Could not set up child signal handler\n");
+-            return ret;
++            goto fail;
+         }
+     } else { /* error */
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "fork failed [%d][%s].\n", errno, strerror(errno));
+-        return err;
++        goto fail;
+     }
+ 
+     return EOK;
++
++fail:
++    PIPE_CLOSE(pipefd_from_child);
++    PIPE_CLOSE(pipefd_to_child);
++    return ret;
+ }
+ 
+ struct ad_gpo_get_sd_referral_state {
+diff --git a/src/providers/ad/ad_machine_pw_renewal.c b/src/providers/ad/ad_machine_pw_renewal.c
+index 205e623e0324ffac563a08ae8a08dd817aa4975f..6b8fe9c8acb4904b88343543af19198040ba4042 100644
+--- a/src/providers/ad/ad_machine_pw_renewal.c
++++ b/src/providers/ad/ad_machine_pw_renewal.c
+@@ -123,8 +123,8 @@ ad_machine_account_password_renewal_send(TALLOC_CTX *mem_ctx,
+     struct tevent_req *subreq;
+     pid_t child_pid;
+     struct timeval tv;
+-    int pipefd_to_child[2];
+-    int pipefd_from_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
++    int pipefd_from_child[2] = PIPE_INIT;
+     int ret;
+     const char **extra_args;
+     const char *server_name;
+@@ -190,11 +190,11 @@ ad_machine_account_password_renewal_send(TALLOC_CTX *mem_ctx,
+     } else if (child_pid > 0) { /* parent */
+ 
+         state->io->read_from_child_fd = pipefd_from_child[0];
+-        close(pipefd_from_child[1]);
++        PIPE_FD_CLOSE(pipefd_from_child[1]);
+         sss_fd_nonblocking(state->io->read_from_child_fd);
+ 
+         state->io->write_to_child_fd = pipefd_to_child[1];
+-        close(pipefd_to_child[0]);
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
+         sss_fd_nonblocking(state->io->write_to_child_fd);
+ 
+         /* Set up SIGCHLD handler */
+@@ -239,6 +239,8 @@ ad_machine_account_password_renewal_send(TALLOC_CTX *mem_ctx,
+ 
+ done:
+     if (ret != EOK) {
++        PIPE_CLOSE(pipefd_from_child);
++        PIPE_CLOSE(pipefd_to_child);
+         tevent_req_error(req, ret);
+         tevent_req_post(req, ev);
+     }
+diff --git a/src/providers/dp_dyndns.c b/src/providers/dp_dyndns.c
+index a5eb383bd4f6c08b846a69f0588b9c25647dc5c8..f1a8b7c59ece0a7f680f4e79da05365642d45fcb 100644
+--- a/src/providers/dp_dyndns.c
++++ b/src/providers/dp_dyndns.c
+@@ -752,6 +752,7 @@ nsupdate_child_send(TALLOC_CTX *mem_ctx,
+ 
+     req = tevent_req_create(mem_ctx, &state, struct nsupdate_child_state);
+     if (req == NULL) {
++        close(pipefd_to_child);
+         return NULL;
+     }
+     state->pipefd_to_child = pipefd_to_child;
+@@ -835,8 +836,7 @@ nsupdate_child_stdin_done(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->pipefd_to_child);
+-    state->pipefd_to_child = -1;
++    PIPE_FD_CLOSE(state->pipefd_to_child);
+ 
+     /* Now either wait for the timeout to fire or the child
+      * to finish
+@@ -880,6 +880,8 @@ nsupdate_child_recv(struct tevent_req *req, int *child_status)
+ 
+     *child_status = state->child_status;
+ 
++    PIPE_FD_CLOSE(state->pipefd_to_child);
++
+     TEVENT_REQ_RETURN_ON_ERROR(req);
+ 
+     return ERR_OK;
+@@ -903,7 +905,7 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
+                                     char *nsupdate_msg,
+                                     bool force_tcp)
+ {
+-    int pipefd_to_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
+     pid_t child_pid;
+     errno_t ret;
+     struct tevent_req *req = NULL;
+@@ -929,7 +931,7 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
+     child_pid = fork();
+ 
+     if (child_pid == 0) { /* child */
+-        close(pipefd_to_child[1]);
++        PIPE_FD_CLOSE(pipefd_to_child[1]);
+         ret = dup2(pipefd_to_child[0], STDIN_FILENO);
+         if (ret == -1) {
+             ret = errno;
+@@ -962,8 +964,11 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
+         DEBUG(SSSDBG_CRIT_FAILURE, "execv failed [%d][%s].\n", ret, strerror(ret));
+         goto done;
+     } else if (child_pid > 0) { /* parent */
+-        close(pipefd_to_child[0]);
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
+ 
++        /* the nsupdate_child request now owns the pipefd and is responsible
++         * for closing it
++         */
+         subreq = nsupdate_child_send(state, ev, pipefd_to_child[1],
+                                      child_pid, nsupdate_msg);
+         if (subreq == NULL) {
+@@ -981,6 +986,7 @@ struct tevent_req *be_nsupdate_send(TALLOC_CTX *mem_ctx,
+     ret = EOK;
+ done:
+     if (ret != EOK) {
++        PIPE_CLOSE(pipefd_to_child);
+         tevent_req_error(req, ret);
+         tevent_req_post(req, ev);
+     }
+diff --git a/src/providers/ipa/ipa_selinux.c b/src/providers/ipa/ipa_selinux.c
+index c546d3a99c2fb6f8b2313a87fc82e4d9e0250441..13eabc00bbd4e51aa9961a3d8ddf0fa3e2926107 100644
+--- a/src/providers/ipa/ipa_selinux.c
++++ b/src/providers/ipa/ipa_selinux.c
+@@ -1023,8 +1023,8 @@ static errno_t selinux_child_create_buffer(struct selinux_child_state *state)
+ 
+ static errno_t selinux_fork_child(struct selinux_child_state *state)
+ {
+-    int pipefd_to_child[2];
+-    int pipefd_from_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
++    int pipefd_from_child[2] = PIPE_INIT;
+     pid_t pid;
+     errno_t ret;
+ 
+@@ -1033,7 +1033,7 @@ static errno_t selinux_fork_child(struct selinux_child_state *state)
+         ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "pipe failed [%d][%s].\n", errno, sss_strerror(errno));
+-        return ret;
++        goto fail;
+     }
+ 
+     ret = pipe(pipefd_to_child);
+@@ -1041,7 +1041,7 @@ static errno_t selinux_fork_child(struct selinux_child_state *state)
+         ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "pipe failed [%d][%s].\n", errno, sss_strerror(errno));
+-        return ret;
++        goto fail;
+     }
+ 
+     pid = fork();
+@@ -1055,9 +1055,9 @@ static errno_t selinux_fork_child(struct selinux_child_state *state)
+         DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec selinux_child\n");
+     } else if (pid > 0) { /* parent */
+         state->io->read_from_child_fd = pipefd_from_child[0];
+-        close(pipefd_from_child[1]);
++        PIPE_FD_CLOSE(pipefd_from_child[1]);
+         state->io->write_to_child_fd = pipefd_to_child[1];
+-        close(pipefd_to_child[0]);
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
+         sss_fd_nonblocking(state->io->read_from_child_fd);
+         sss_fd_nonblocking(state->io->write_to_child_fd);
+ 
+@@ -1065,16 +1065,21 @@ static errno_t selinux_fork_child(struct selinux_child_state *state)
+         if (ret != EOK) {
+             DEBUG(SSSDBG_CRIT_FAILURE,
+                   "Could not set up child signal handler\n");
+-            return ret;
++            goto fail;
+         }
+     } else { /* error */
+         ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "fork failed [%d][%s].\n", errno, sss_strerror(errno));
+-        return ret;
++        goto fail;
+     }
+ 
+     return EOK;
++
++fail:
++    PIPE_CLOSE(pipefd_from_child);
++    PIPE_CLOSE(pipefd_to_child);
++    return ret;
+ }
+ 
+ static void selinux_child_step(struct tevent_req *subreq)
+@@ -1094,8 +1099,7 @@ static void selinux_child_step(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->io->write_to_child_fd);
+-    state->io->write_to_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->write_to_child_fd);
+ 
+     subreq = read_pipe_send(state, state->ev, state->io->read_from_child_fd);
+     if (subreq == NULL) {
+@@ -1124,8 +1128,7 @@ static void selinux_child_done(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->io->read_from_child_fd);
+-    state->io->read_from_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->read_from_child_fd);
+ 
+     ret = selinux_child_parse_response(buf, len, &child_result);
+     if (ret != EOK) {
+diff --git a/src/providers/krb5/krb5_child_handler.c b/src/providers/krb5/krb5_child_handler.c
+index 1ca74fcd71e75a49c6afb634c1414f0a71764317..09a1e5f59494a5c07d5c9eefb94919ca9389cb27 100644
+--- a/src/providers/krb5/krb5_child_handler.c
++++ b/src/providers/krb5/krb5_child_handler.c
+@@ -275,11 +275,10 @@ static errno_t activate_child_timeout_handler(struct tevent_req *req,
+ 
+ static errno_t fork_child(struct tevent_req *req)
+ {
+-    int pipefd_to_child[2];
+-    int pipefd_from_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
++    int pipefd_from_child[2] = PIPE_INIT;
+     pid_t pid;
+-    int ret;
+-    errno_t err;
++    errno_t ret;
+     struct handle_child_state *state = tevent_req_data(req,
+                                                      struct handle_child_state);
+     const char *k5c_extra_args[3];
+@@ -293,17 +292,17 @@ static errno_t fork_child(struct tevent_req *req)
+ 
+     ret = pipe(pipefd_from_child);
+     if (ret == -1) {
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "pipe failed [%d][%s].\n", errno, strerror(errno));
+-        return err;
++        goto fail;
+     }
+     ret = pipe(pipefd_to_child);
+     if (ret == -1) {
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "pipe failed [%d][%s].\n", errno, strerror(errno));
+-        return err;
++        goto fail;
+     }
+ 
+     pid = fork();
+@@ -319,9 +318,9 @@ static errno_t fork_child(struct tevent_req *req)
+     } else if (pid > 0) { /* parent */
+         state->child_pid = pid;
+         state->io->read_from_child_fd = pipefd_from_child[0];
+-        close(pipefd_from_child[1]);
++        PIPE_FD_CLOSE(pipefd_from_child[1]);
+         state->io->write_to_child_fd = pipefd_to_child[1];
+-        close(pipefd_to_child[0]);
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
+         sss_fd_nonblocking(state->io->read_from_child_fd);
+         sss_fd_nonblocking(state->io->write_to_child_fd);
+ 
+@@ -329,24 +328,29 @@ static errno_t fork_child(struct tevent_req *req)
+         if (ret != EOK) {
+             DEBUG(SSSDBG_CRIT_FAILURE,
+                   "Could not set up child signal handler\n");
+-            return ret;
++            goto fail;
+         }
+ 
+-        err = activate_child_timeout_handler(req, state->ev,
++        ret = activate_child_timeout_handler(req, state->ev,
+                   dp_opt_get_int(state->kr->krb5_ctx->opts, KRB5_AUTH_TIMEOUT));
+-        if (err != EOK) {
++        if (ret != EOK) {
+             DEBUG(SSSDBG_CRIT_FAILURE,
+                   "activate_child_timeout_handler failed.\n");
+         }
+ 
+     } else { /* error */
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+-              "fork failed [%d][%s].\n", errno, strerror(errno));
+-        return err;
++              "fork failed [%d][%s].\n", errno, strerror(ret));
++        goto fail;
+     }
+ 
+     return EOK;
++
++fail:
++    PIPE_CLOSE(pipefd_from_child);
++    PIPE_CLOSE(pipefd_to_child);
++    return ret;
+ }
+ 
+ static void handle_child_step(struct tevent_req *subreq);
+@@ -426,8 +430,7 @@ static void handle_child_step(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->io->write_to_child_fd);
+-    state->io->write_to_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->write_to_child_fd);
+ 
+     subreq = read_pipe_send(state, state->ev, state->io->read_from_child_fd);
+     if (!subreq) {
+@@ -454,8 +457,7 @@ static void handle_child_done(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->io->read_from_child_fd);
+-    state->io->read_from_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->read_from_child_fd);
+ 
+     tevent_req_done(req);
+     return;
+diff --git a/src/providers/ldap/sdap_child_helpers.c b/src/providers/ldap/sdap_child_helpers.c
+index 69b470dbf0010cb66275c98894219481dccde80b..92642e8e47e530e5aef5f78bf1c7a2427979275e 100644
+--- a/src/providers/ldap/sdap_child_helpers.c
++++ b/src/providers/ldap/sdap_child_helpers.c
+@@ -72,25 +72,24 @@ static void sdap_close_fd(int *fd)
+ static errno_t sdap_fork_child(struct tevent_context *ev,
+                                struct sdap_child *child)
+ {
+-    int pipefd_to_child[2];
+-    int pipefd_from_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
++    int pipefd_from_child[2] = PIPE_INIT;
+     pid_t pid;
+-    int ret;
+-    errno_t err;
++    errno_t ret;
+ 
+     ret = pipe(pipefd_from_child);
+     if (ret == -1) {
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+-              "pipe failed [%d][%s].\n", err, strerror(err));
+-        return err;
++              "pipe failed [%d][%s].\n", ret, strerror(ret));
++        goto fail;
+     }
+     ret = pipe(pipefd_to_child);
+     if (ret == -1) {
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+-              "pipe failed [%d][%s].\n", err, strerror(err));
+-        return err;
++              "pipe failed [%d][%s].\n", ret, strerror(ret));
++        goto fail;
+     }
+ 
+     pid = fork();
+@@ -105,25 +104,30 @@ static errno_t sdap_fork_child(struct tevent_context *ev,
+     } else if (pid > 0) { /* parent */
+         child->pid = pid;
+         child->io->read_from_child_fd = pipefd_from_child[0];
+-        close(pipefd_from_child[1]);
++        PIPE_FD_CLOSE(pipefd_from_child[1]);
+         child->io->write_to_child_fd = pipefd_to_child[1];
+-        close(pipefd_to_child[0]);
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
+         sss_fd_nonblocking(child->io->read_from_child_fd);
+         sss_fd_nonblocking(child->io->write_to_child_fd);
+ 
+         ret = child_handler_setup(ev, pid, NULL, NULL, NULL);
+         if (ret != EOK) {
+-            return ret;
++            goto fail;
+         }
+ 
+     } else { /* error */
+-        err = errno;
++        ret = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+-              "fork failed [%d][%s].\n", err, strerror(err));
+-        return err;
++              "fork failed [%d][%s].\n", ret, strerror(ret));
++        goto fail;
+     }
+ 
+     return EOK;
++
++fail:
++    PIPE_CLOSE(pipefd_from_child);
++    PIPE_CLOSE(pipefd_to_child);
++    return ret;
+ }
+ 
+ static errno_t create_tgt_req_send_buffer(TALLOC_CTX *mem_ctx,
+diff --git a/src/responder/pam/pamsrv_p11.c b/src/responder/pam/pamsrv_p11.c
+index ea4c78022c7e9a609f343ac3af6481c436722fd4..d72737e38b8ba41db6f56686005fbf4a11c49feb 100644
+--- a/src/responder/pam/pamsrv_p11.c
++++ b/src/responder/pam/pamsrv_p11.c
+@@ -219,8 +219,7 @@ struct pam_check_cert_state {
+     struct tevent_timer *timeout_handler;
+     struct tevent_context *ev;
+ 
+-    int write_to_child_fd;
+-    int read_from_child_fd;
++    struct child_io_fds *io;
+     char *cert;
+     char *token_name;
+ };
+@@ -245,8 +244,8 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+     struct pam_check_cert_state *state;
+     pid_t child_pid;
+     struct timeval tv;
+-    int pipefd_to_child[2];
+-    int pipefd_from_child[2];
++    int pipefd_to_child[2] = PIPE_INIT;
++    int pipefd_from_child[2] = PIPE_INIT;
+     const char *extra_args[7] = { NULL };
+     uint8_t *write_buf = NULL;
+     size_t write_buf_len = 0;
+@@ -295,10 +294,17 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+ 
+     state->ev = ev;
+     state->child_status = EFAULT;
+-    state->read_from_child_fd = -1;
+-    state->write_to_child_fd = -1;
+     state->cert = NULL;
+     state->token_name = NULL;
++    state->io = talloc(state, struct child_io_fds);
++    if (state->io == NULL) {
++        DEBUG(SSSDBG_CRIT_FAILURE, "talloc failed.\n");
++        ret = ENOMEM;
++        goto done;
++    }
++    state->io->write_to_child_fd = -1;
++    state->io->read_from_child_fd = -1;
++    talloc_set_destructor((void *) state->io, child_io_destructor);
+ 
+     ret = pipe(pipefd_from_child);
+     if (ret == -1) {
+@@ -329,13 +335,13 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+         DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec p11 child\n");
+     } else if (child_pid > 0) { /* parent */
+ 
+-        state->read_from_child_fd = pipefd_from_child[0];
+-        close(pipefd_from_child[1]);
+-        sss_fd_nonblocking(state->read_from_child_fd);
++        state->io->read_from_child_fd = pipefd_from_child[0];
++        PIPE_FD_CLOSE(pipefd_from_child[1]);
++        sss_fd_nonblocking(state->io->read_from_child_fd);
+ 
+-        state->write_to_child_fd = pipefd_to_child[1];
+-        close(pipefd_to_child[0]);
+-        sss_fd_nonblocking(state->write_to_child_fd);
++        state->io->write_to_child_fd = pipefd_to_child[1];
++        PIPE_FD_CLOSE(pipefd_to_child[0]);
++        sss_fd_nonblocking(state->io->write_to_child_fd);
+ 
+         /* Set up SIGCHLD handler */
+         ret = child_handler_setup(ev, child_pid, NULL, NULL, &state->child_ctx);
+@@ -367,7 +373,7 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+ 
+         if (write_buf_len != 0) {
+             subreq = write_pipe_send(state, ev, write_buf, write_buf_len,
+-                                     state->write_to_child_fd);
++                                     state->io->write_to_child_fd);
+             if (subreq == NULL) {
+                 DEBUG(SSSDBG_OP_FAILURE, "write_pipe_send failed.\n");
+                 ret = ERR_P11_CHILD;
+@@ -375,7 +381,7 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+             }
+             tevent_req_set_callback(subreq, p11_child_write_done, req);
+         } else {
+-            subreq = read_pipe_send(state, ev, state->read_from_child_fd);
++            subreq = read_pipe_send(state, ev, state->io->read_from_child_fd);
+             if (subreq == NULL) {
+                 DEBUG(SSSDBG_OP_FAILURE, "read_pipe_send failed.\n");
+                 ret = ERR_P11_CHILD;
+@@ -398,6 +404,8 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+ 
+ done:
+     if (ret != EOK) {
++        PIPE_CLOSE(pipefd_from_child);
++        PIPE_CLOSE(pipefd_to_child);
+         tevent_req_error(req, ret);
+         tevent_req_post(req, ev);
+     }
+@@ -419,10 +427,9 @@ static void p11_child_write_done(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->write_to_child_fd);
+-    state->write_to_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->write_to_child_fd);
+ 
+-    subreq = read_pipe_send(state, state->ev, state->read_from_child_fd);
++    subreq = read_pipe_send(state, state->ev, state->io->read_from_child_fd);
+     if (subreq == NULL) {
+         tevent_req_error(req, ENOMEM);
+         return;
+@@ -449,8 +456,7 @@ static void p11_child_done(struct tevent_req *subreq)
+         return;
+     }
+ 
+-    close(state->read_from_child_fd);
+-    state->read_from_child_fd = -1;
++    PIPE_FD_CLOSE(state->io->read_from_child_fd);
+ 
+     ret = parse_p11_child_response(state, buf, buf_len, &state->cert,
+                                    &state->token_name);
+diff --git a/src/util/util.h b/src/util/util.h
+index c0db6779f7f6fae44a5d956ae52a166f0f4eefc6..0bf773960775bdef92182b7f2ca4098db369e71f 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -189,6 +189,20 @@ int get_fd_from_debug_file(void);
+ #define FLAGS_INTERACTIVE 0x0002
+ #define FLAGS_PID_FILE 0x0004
+ 
++#define PIPE_INIT { -1, -1 }
++
++#define PIPE_FD_CLOSE(fd) do {      \
++    if (fd != -1) {                 \
++        close(fd);                  \
++        fd = -1;                    \
++    }                               \
++} while(0);
++
++#define PIPE_CLOSE(p) do {          \
++    PIPE_FD_CLOSE(p[0]);            \
++    PIPE_FD_CLOSE(p[1]);            \
++} while(0);
++
+ #ifndef talloc_zfree
+ #define talloc_zfree(ptr) do { talloc_free(discard_const(ptr)); ptr = NULL; } while(0)
+ #endif
+-- 
+2.4.11
+

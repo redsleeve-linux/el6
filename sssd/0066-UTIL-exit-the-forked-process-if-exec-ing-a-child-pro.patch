@@ -1,0 +1,375 @@
+From d319e3b981909288a0caf38e64912cac65c1e296 Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Tue, 17 May 2016 11:52:00 +0200
+Subject: [PATCH 66/68] UTIL: exit() the forked process if exec()-ing a child
+ process fails
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When exec() fails, we should not attempt to continue, but just kill the
+forked process. The patch adds this logic to the exec_child() and
+exec_child_ex() functions to avoid code duplication
+
+Resolves:
+https://fedorahosted.org/sssd/ticket/3016
+
+Reviewed-by: Lukáš Slebodník <lslebodn@redhat.com>
+(cherry picked from commit de8815aba87d08b6b7ac5d502dcb1755787e0857)
+(cherry picked from commit 763af7adc2ce2d8fbbb9cb8e6faff9c346ef23d0)
+---
+ src/providers/ad/ad_gpo.c                | 14 ++++-----
+ src/providers/ad/ad_machine_pw_renewal.c | 16 +++++-----
+ src/providers/ipa/ipa_selinux.c          | 12 ++++----
+ src/providers/krb5/krb5_child_handler.c  | 16 +++++-----
+ src/providers/ldap/sdap_child_helpers.c  | 12 ++++----
+ src/responder/pam/pamsrv_p11.c           | 14 ++++-----
+ src/tests/cmocka/test_child_common.c     | 51 ++++++++++++++------------------
+ src/util/child_common.c                  | 30 +++++++++----------
+ src/util/child_common.h                  | 16 +++++-----
+ 9 files changed, 85 insertions(+), 96 deletions(-)
+
+diff --git a/src/providers/ad/ad_gpo.c b/src/providers/ad/ad_gpo.c
+index 00f4457ddfa35b8917d7babc6666fdc129fb63ae..869c0280e9497c7f1c46ac34d4f93fb023eefb56 100644
+--- a/src/providers/ad/ad_gpo.c
++++ b/src/providers/ad/ad_gpo.c
+@@ -4137,13 +4137,13 @@ gpo_fork_child(struct tevent_req *req)
+     pid = fork();
+ 
+     if (pid == 0) { /* child */
+-        err = exec_child_ex(state,
+-                            pipefd_to_child, pipefd_from_child,
+-                            GPO_CHILD, gpo_child_debug_fd, NULL, false,
+-                            STDIN_FILENO, AD_GPO_CHILD_OUT_FILENO);
+-        DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec gpo_child: [%d][%s].\n",
+-              err, strerror(err));
+-        return err;
++        exec_child_ex(state,
++                      pipefd_to_child, pipefd_from_child,
++                      GPO_CHILD, gpo_child_debug_fd, NULL, false,
++                      STDIN_FILENO, AD_GPO_CHILD_OUT_FILENO);
++
++        /* We should never get here */
++        DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec gpo_child:\n");
+     } else if (pid > 0) { /* parent */
+         state->child_pid = pid;
+         state->io->read_from_child_fd = pipefd_from_child[0];
+diff --git a/src/providers/ad/ad_machine_pw_renewal.c b/src/providers/ad/ad_machine_pw_renewal.c
+index 7997fbb0cdaa9490cd4e5c794c9d98e3b892673e..3d79aa0a600233c7269917b0088bdf07204680d8 100644
+--- a/src/providers/ad/ad_machine_pw_renewal.c
++++ b/src/providers/ad/ad_machine_pw_renewal.c
+@@ -174,15 +174,13 @@ ad_machine_account_password_renewal_send(TALLOC_CTX *mem_ctx,
+ 
+     child_pid = fork();
+     if (child_pid == 0) { /* child */
+-        ret = exec_child_ex(state, pipefd_to_child, pipefd_from_child,
+-                            renewal_data->prog_path, -1,
+-                            extra_args, true,
+-                            STDIN_FILENO, STDERR_FILENO);
+-        if (ret != EOK) {
+-            DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec renewal child: [%d][%s].\n",
+-                                       ret, strerror(ret));
+-            goto done;
+-        }
++        exec_child_ex(state, pipefd_to_child, pipefd_from_child,
++                      renewal_data->prog_path, -1,
++                      extra_args, true,
++                      STDIN_FILENO, STDERR_FILENO);
++
++        /* We should never get here */
++        DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec renewal child\n");
+     } else if (child_pid > 0) { /* parent */
+ 
+         state->read_from_child_fd = pipefd_from_child[0];
+diff --git a/src/providers/ipa/ipa_selinux.c b/src/providers/ipa/ipa_selinux.c
+index 3e9efee325f518846dff8b87d4f513b5e5a5ff89..c546d3a99c2fb6f8b2313a87fc82e4d9e0250441 100644
+--- a/src/providers/ipa/ipa_selinux.c
++++ b/src/providers/ipa/ipa_selinux.c
+@@ -1047,12 +1047,12 @@ static errno_t selinux_fork_child(struct selinux_child_state *state)
+     pid = fork();
+ 
+     if (pid == 0) { /* child */
+-        ret = exec_child(state,
+-                         pipefd_to_child, pipefd_from_child,
+-                         SELINUX_CHILD, selinux_child_debug_fd);
+-        DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec selinux_child: [%d][%s].\n",
+-              ret, sss_strerror(ret));
+-        return ret;
++        exec_child(state,
++                   pipefd_to_child, pipefd_from_child,
++                   SELINUX_CHILD, selinux_child_debug_fd);
++
++        /* We should never get here */
++        DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec selinux_child\n");
+     } else if (pid > 0) { /* parent */
+         state->io->read_from_child_fd = pipefd_from_child[0];
+         close(pipefd_from_child[1]);
+diff --git a/src/providers/krb5/krb5_child_handler.c b/src/providers/krb5/krb5_child_handler.c
+index 167a2b2ad09b67908cdce8051d8a37e557c91545..1ca74fcd71e75a49c6afb634c1414f0a71764317 100644
+--- a/src/providers/krb5/krb5_child_handler.c
++++ b/src/providers/krb5/krb5_child_handler.c
+@@ -309,15 +309,13 @@ static errno_t fork_child(struct tevent_req *req)
+     pid = fork();
+ 
+     if (pid == 0) { /* child */
+-        err = exec_child_ex(state,
+-                            pipefd_to_child, pipefd_from_child,
+-                            KRB5_CHILD, state->kr->krb5_ctx->child_debug_fd,
+-                            k5c_extra_args, false, STDIN_FILENO, STDOUT_FILENO);
+-        if (err != EOK) {
+-            DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec KRB5 child: [%d][%s].\n",
+-                      err, strerror(err));
+-            return err;
+-        }
++        exec_child_ex(state,
++                      pipefd_to_child, pipefd_from_child,
++                      KRB5_CHILD, state->kr->krb5_ctx->child_debug_fd,
++                      k5c_extra_args, false, STDIN_FILENO, STDOUT_FILENO);
++
++        /* We should never get here */
++        DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec KRB5 child\n");
+     } else if (pid > 0) { /* parent */
+         state->child_pid = pid;
+         state->io->read_from_child_fd = pipefd_from_child[0];
+diff --git a/src/providers/ldap/sdap_child_helpers.c b/src/providers/ldap/sdap_child_helpers.c
+index 90330f13ff5d04ad0a779bdef8aad4d856f9afd0..69b470dbf0010cb66275c98894219481dccde80b 100644
+--- a/src/providers/ldap/sdap_child_helpers.c
++++ b/src/providers/ldap/sdap_child_helpers.c
+@@ -96,12 +96,12 @@ static errno_t sdap_fork_child(struct tevent_context *ev,
+     pid = fork();
+ 
+     if (pid == 0) { /* child */
+-        err = exec_child(child,
+-                         pipefd_to_child, pipefd_from_child,
+-                         LDAP_CHILD, ldap_child_debug_fd);
+-        DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec LDAP child: [%d][%s].\n",
+-                                    err, strerror(err));
+-        return err;
++        exec_child(child,
++                   pipefd_to_child, pipefd_from_child,
++                   LDAP_CHILD, ldap_child_debug_fd);
++
++        /* We should never get here */
++        DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec LDAP child\n");
+     } else if (pid > 0) { /* parent */
+         child->pid = pid;
+         child->io->read_from_child_fd = pipefd_from_child[0];
+diff --git a/src/responder/pam/pamsrv_p11.c b/src/responder/pam/pamsrv_p11.c
+index ad1670136dbf8efc41df6950af744ff8b06e6a11..ea4c78022c7e9a609f343ac3af6481c436722fd4 100644
+--- a/src/responder/pam/pamsrv_p11.c
++++ b/src/responder/pam/pamsrv_p11.c
+@@ -321,14 +321,12 @@ struct tevent_req *pam_check_cert_send(TALLOC_CTX *mem_ctx,
+ 
+     child_pid = fork();
+     if (child_pid == 0) { /* child */
+-        ret = exec_child_ex(state, pipefd_to_child, pipefd_from_child,
+-                            P11_CHILD_PATH, child_debug_fd, extra_args, false,
+-                            STDIN_FILENO, STDOUT_FILENO);
+-        if (ret != EOK) {
+-            DEBUG(SSSDBG_CRIT_FAILURE, "Could not exec p11 child: [%d][%s].\n",
+-                                       ret, strerror(ret));
+-            goto done;
+-        }
++        exec_child_ex(state, pipefd_to_child, pipefd_from_child,
++                      P11_CHILD_PATH, child_debug_fd, extra_args, false,
++                      STDIN_FILENO, STDOUT_FILENO);
++
++        /* We should never get here */
++        DEBUG(SSSDBG_CRIT_FAILURE, "BUG: Could not exec p11 child\n");
+     } else if (child_pid > 0) { /* parent */
+ 
+         state->read_from_child_fd = pipefd_from_child[0];
+diff --git a/src/tests/cmocka/test_child_common.c b/src/tests/cmocka/test_child_common.c
+index 423132bdf7c1e429ce895821c8c7ed5e013ecb55..d7b927af584aed95da76bcfbcd889afcad5dcba8 100644
+--- a/src/tests/cmocka/test_child_common.c
++++ b/src/tests/cmocka/test_child_common.c
+@@ -96,11 +96,10 @@ void test_exec_child(void **state)
+     child_pid = fork();
+     assert_int_not_equal(child_pid, -1);
+     if (child_pid == 0) {
+-        ret = exec_child(child_tctx,
+-                         child_tctx->pipefd_to_child,
+-                         child_tctx->pipefd_from_child,
+-                         CHILD_DIR"/"TEST_BIN, 2);
+-        assert_int_equal(ret, EOK);
++        exec_child(child_tctx,
++                   child_tctx->pipefd_to_child,
++                   child_tctx->pipefd_from_child,
++                   CHILD_DIR"/"TEST_BIN, 2);
+     } else {
+             do {
+                 errno = 0;
+@@ -168,13 +167,12 @@ static void extra_args_test(struct child_test_ctx *child_tctx,
+     if (child_pid == 0) {
+         debug_timestamps = 1;
+ 
+-        ret = exec_child_ex(child_tctx,
+-                            child_tctx->pipefd_to_child,
+-                            child_tctx->pipefd_from_child,
+-                            CHILD_DIR"/"TEST_BIN, 2, extra_args,
+-                            extra_args_only,
+-                            STDIN_FILENO, STDOUT_FILENO);
+-        assert_int_equal(ret, EOK);
++        exec_child_ex(child_tctx,
++                      child_tctx->pipefd_to_child,
++                      child_tctx->pipefd_from_child,
++                      CHILD_DIR"/"TEST_BIN, 2, extra_args,
++                      extra_args_only,
++                      STDIN_FILENO, STDOUT_FILENO);
+     } else {
+             do {
+                 errno = 0;
+@@ -292,11 +290,10 @@ void test_exec_child_handler(void **state)
+     child_pid = fork();
+     assert_int_not_equal(child_pid, -1);
+     if (child_pid == 0) {
+-        ret = exec_child(child_tctx,
+-                         child_tctx->pipefd_to_child,
+-                         child_tctx->pipefd_from_child,
+-                         CHILD_DIR"/"TEST_BIN, 2);
+-        assert_int_equal(ret, EOK);
++        exec_child(child_tctx,
++                   child_tctx->pipefd_to_child,
++                   child_tctx->pipefd_from_child,
++                   CHILD_DIR"/"TEST_BIN, 2);
+     }
+ 
+     ret = child_handler_setup(child_tctx->test_ctx->ev, child_pid,
+@@ -343,12 +340,11 @@ void test_exec_child_echo(void **state)
+     child_pid = fork();
+     assert_int_not_equal(child_pid, -1);
+     if (child_pid == 0) {
+-        ret = exec_child_ex(child_tctx,
+-                            child_tctx->pipefd_to_child,
+-                            child_tctx->pipefd_from_child,
+-                            CHILD_DIR"/"TEST_BIN, 2, NULL, false,
+-                            STDIN_FILENO, 3);
+-        assert_int_equal(ret, EOK);
++        exec_child_ex(child_tctx,
++                      child_tctx->pipefd_to_child,
++                      child_tctx->pipefd_from_child,
++                      CHILD_DIR"/"TEST_BIN, 2, NULL, false,
++                      STDIN_FILENO, 3);
+     }
+ 
+     DEBUG(SSSDBG_FUNC_DATA, "Forked into %d\n", child_pid);
+@@ -477,11 +473,10 @@ void test_sss_child(void **state)
+     child_pid = fork();
+     assert_int_not_equal(child_pid, -1);
+     if (child_pid == 0) {
+-        ret = exec_child(child_tctx,
+-                         child_tctx->pipefd_to_child,
+-                         child_tctx->pipefd_from_child,
+-                         CHILD_DIR"/"TEST_BIN, 2);
+-        assert_int_equal(ret, EOK);
++        exec_child(child_tctx,
++                   child_tctx->pipefd_to_child,
++                   child_tctx->pipefd_from_child,
++                   CHILD_DIR"/"TEST_BIN, 2);
+     }
+ 
+     ret = sss_child_register(child_tctx, sc_ctx,
+diff --git a/src/util/child_common.c b/src/util/child_common.c
+index 60466c146b5bd9147e9425736072f1ea6ed73663..ffe565ecfaee3671ff289c803e414428d77c6201 100644
+--- a/src/util/child_common.c
++++ b/src/util/child_common.c
+@@ -726,11 +726,11 @@ fail:
+     return ret;
+ }
+ 
+-errno_t exec_child_ex(TALLOC_CTX *mem_ctx,
+-                      int *pipefd_to_child, int *pipefd_from_child,
+-                      const char *binary, int debug_fd,
+-                      const char *extra_argv[], bool extra_args_only,
+-                      int child_in_fd, int child_out_fd)
++void exec_child_ex(TALLOC_CTX *mem_ctx,
++                   int *pipefd_to_child, int *pipefd_from_child,
++                   const char *binary, int debug_fd,
++                   const char *extra_argv[], bool extra_args_only,
++                   int child_in_fd, int child_out_fd)
+ {
+     int ret;
+     errno_t err;
+@@ -742,7 +742,7 @@ errno_t exec_child_ex(TALLOC_CTX *mem_ctx,
+         err = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "dup2 failed [%d][%s].\n", err, strerror(err));
+-        return err;
++        exit(EXIT_FAILURE);
+     }
+ 
+     close(pipefd_from_child[0]);
+@@ -751,7 +751,7 @@ errno_t exec_child_ex(TALLOC_CTX *mem_ctx,
+         err = errno;
+         DEBUG(SSSDBG_CRIT_FAILURE,
+               "dup2 failed [%d][%s].\n", err, strerror(err));
+-        return err;
++        exit(EXIT_FAILURE);
+     }
+ 
+     ret = prepare_child_argv(mem_ctx, debug_fd,
+@@ -759,22 +759,22 @@ errno_t exec_child_ex(TALLOC_CTX *mem_ctx,
+                              &argv);
+     if (ret != EOK) {
+         DEBUG(SSSDBG_CRIT_FAILURE, "prepare_child_argv.\n");
+-        return ret;
++        exit(EXIT_FAILURE);
+     }
+ 
+     execv(binary, argv);
+     err = errno;
+     DEBUG(SSSDBG_OP_FAILURE, "execv failed [%d][%s].\n", err, strerror(err));
+-    return err;
++    exit(EXIT_FAILURE);
+ }
+ 
+-errno_t exec_child(TALLOC_CTX *mem_ctx,
+-                   int *pipefd_to_child, int *pipefd_from_child,
+-                   const char *binary, int debug_fd)
++void exec_child(TALLOC_CTX *mem_ctx,
++                int *pipefd_to_child, int *pipefd_from_child,
++                const char *binary, int debug_fd)
+ {
+-    return exec_child_ex(mem_ctx, pipefd_to_child, pipefd_from_child,
+-                         binary, debug_fd, NULL, false,
+-                         STDIN_FILENO, STDOUT_FILENO);
++    exec_child_ex(mem_ctx, pipefd_to_child, pipefd_from_child,
++                  binary, debug_fd, NULL, false,
++                  STDIN_FILENO, STDOUT_FILENO);
+ }
+ 
+ int child_io_destructor(void *ptr)
+diff --git a/src/util/child_common.h b/src/util/child_common.h
+index 0111f2cdb26af8543d68e6a6661d656d1c9c45ac..2a62869034a466b465a481286950678af73667ab 100644
+--- a/src/util/child_common.h
++++ b/src/util/child_common.h
+@@ -101,18 +101,18 @@ int read_pipe_recv(struct tevent_req *req, TALLOC_CTX *mem_ctx,
+ void fd_nonblocking(int fd);
+ 
+ /* Never returns EOK, ether returns an error, or doesn't return on success */
+-errno_t exec_child_ex(TALLOC_CTX *mem_ctx,
+-                      int *pipefd_to_child, int *pipefd_from_child,
+-                      const char *binary, int debug_fd,
+-                      const char *extra_argv[], bool extra_args_only,
+-                      int child_in_fd, int child_out_fd);
++void exec_child_ex(TALLOC_CTX *mem_ctx,
++                   int *pipefd_to_child, int *pipefd_from_child,
++                   const char *binary, int debug_fd,
++                   const char *extra_argv[], bool extra_args_only,
++                   int child_in_fd, int child_out_fd);
+ 
+ /* Same as exec_child_ex() except child_in_fd is set to STDIN_FILENO and
+  * child_out_fd is set to STDOUT_FILENO and extra_argv is always NULL.
+  */
+-errno_t exec_child(TALLOC_CTX *mem_ctx,
+-                   int *pipefd_to_child, int *pipefd_from_child,
+-                   const char *binary, int debug_fd);
++void exec_child(TALLOC_CTX *mem_ctx,
++                int *pipefd_to_child, int *pipefd_from_child,
++                const char *binary, int debug_fd);
+ 
+ int child_io_destructor(void *ptr);
+ 
+-- 
+2.4.11
+

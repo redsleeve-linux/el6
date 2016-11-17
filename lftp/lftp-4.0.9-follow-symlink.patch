@@ -1,0 +1,988 @@
+diff --git a/src/FileAccess.cc b/src/FileAccess.cc
+index 63ce23e..d9dc5c5 100644
+--- a/src/FileAccess.cc
++++ b/src/FileAccess.cc
+@@ -66,12 +66,12 @@ void FileAccess::Init()
+    retries=0;
+    opt_date=0;
+    opt_size=0;
++   fileset_for_info=0;
+    error_code=OK;
+    saved_errno=0;
+    mkdir_p=false;
+    ascii=false;
+    norest_manual=false;
+-   array_ptr=array_cnt=0;
+ 
+    entity_size=NO_SIZE;
+    entity_date=NO_DATE;
+@@ -195,8 +195,7 @@ void FileAccess::Close()
+    mode=CLOSED;
+    opt_date=0;
+    opt_size=0;
+-   array_for_info=0;
+-   array_ptr=array_cnt=0;
++   fileset_for_info=0;
+    entity_size=NO_SIZE;
+    entity_date=NO_DATE;
+    ascii=false;
+@@ -366,12 +365,11 @@ void FileAccess::SetPasswordGlobal(const char *p)
+    }
+ }
+ 
+-void FileAccess::GetInfoArray(struct fileinfo *info,int count)
++void FileAccess::GetInfoArray(FileSet *info)
+ {
+    Open(0,ARRAY_INFO);
+-   array_for_info=info;
+-   array_ptr=0;
+-   array_cnt=count;
++   fileset_for_info=info;
++   fileset_for_info->rewind();
+ }
+ 
+ static void expand_tilde(xstring &path, const char *home, int i=0)
+diff --git a/src/FileAccess.h b/src/FileAccess.h
+index a5de2f6..1e275a0 100644
+--- a/src/FileAccess.h
++++ b/src/FileAccess.h
+@@ -68,16 +68,6 @@ public:
+       CHANGE_MODE
+    };
+ 
+-   struct fileinfo
+-   {
+-      off_t size;
+-      const char *file;
+-      time_t time;
+-      bool get_size:1;
+-      bool get_time:1;
+-      bool is_dir:1;
+-   };
+-
+    class Path
+    {
+       void init();
+@@ -135,13 +125,11 @@ protected:
+    FileTimestamp *opt_date;
+    off_t  *opt_size;
+ 
++   FileSet *fileset_for_info;
++
+    time_t try_time;
+    int retries;
+ 
+-   fileinfo *array_for_info;
+-   int	 array_ptr;
+-   int	 array_cnt;
+-
+    bool	 mkdir_p;
+ 
+    int	 saved_errno;
+@@ -238,13 +226,8 @@ public:
+    void RemoveDir(const char *dir)  { Open(dir,REMOVE_DIR); }
+    void Chmod(const char *file,int m);
+ 
+-   void	 GetInfoArray(struct fileinfo *info,int count);
+-   int	 InfoArrayPercentDone()
+-      {
+-	 if(array_cnt==0)
+-	    return 100;
+-	 return array_ptr*100/array_cnt;
+-      }
++   void GetInfoArray(FileSet *info);
++   int InfoArrayPercentDone() { return fileset_for_info->curr_pct(); }
+ 
+    virtual const char *CurrentStatus();
+ 
+diff --git a/src/FileCopy.cc b/src/FileCopy.cc
+index 1b7a63b..9d8c95d 100644
+--- a/src/FileCopy.cc
++++ b/src/FileCopy.cc
+@@ -783,10 +783,13 @@ int FileCopyPeerFA::Do()
+    {
+       if(session->IsClosed())
+       {
+-	 info.file=file;
+-	 info.get_size=true;
+-	 info.get_time=want_date;
+-	 session->GetInfoArray(&info,1);
++	 FileInfo *fi=new FileInfo(file);
++	 fi->Need(fi->SIZE);
++	 if(want_date)
++	   fi->Need(fi->DATE);
++	 info.Empty();
++	 info.Add(fi);
++	 session->GetInfoArray(&info);
+ 	 m=MOVED;
+       }
+       res=session->Done();
+@@ -798,8 +801,11 @@ int FileCopyPeerFA::Do()
+ 	 SetSize(NO_SIZE);
+ 	 return MOVED;
+       }
+-      SetSize(info.size);
+-      SetDate(info.time);
++      FileInfo *fi=info[0];
++      if(fi->Has(fi->SIZE))
++	 SetSize(fi->size);
++      if(fi->Has(fi->DATE))
++	 SetDate(fi->date);
+       session->Close();
+       return MOVED;
+    }
+diff --git a/src/FileCopy.h b/src/FileCopy.h
+index df2a822..0cee108 100644
+--- a/src/FileCopy.h
++++ b/src/FileCopy.h
+@@ -292,7 +292,7 @@ class FileCopyPeerFA : public FileCopyPeer
+    int Put_LL(const char *buf,int size);
+    int PutEOF_LL();
+ 
+-   FileAccess::fileinfo info;
++   FileSet info;
+ 
+    bool fxp;   // FXP (ftp<=>ftp copy) active
+ 
+diff --git a/src/FileSet.cc b/src/FileSet.cc
+index 0c3f4e2..7b5e321 100644
+--- a/src/FileSet.cc
++++ b/src/FileSet.cc
+@@ -76,7 +76,7 @@ void FileInfo::SetUser(const char *u)
+    if(u==user)
+       return;
+    user=StringPool::Get(u);
+-   defined|=USER;
++   def(USER);
+ }
+ 
+ void FileInfo::SetGroup(const char *g)
+@@ -84,7 +84,7 @@ void FileInfo::SetGroup(const char *g)
+    if(g==group)
+       return;
+    group=StringPool::Get(g);
+-   defined|=GROUP;
++   def(GROUP);
+ }
+ 
+ void FileSet::add_before(int pos,FileInfo *fi)
+@@ -634,6 +634,7 @@ void FileInfo::Init()
+    size=NO_SIZE;
+    nlinks=0;
+    defined=0;
++   need=0;
+    user=0; group=0;
+    rank=0;
+ }
+diff --git a/src/FileSet.h b/src/FileSet.h
+index 5a34f85..b1a48c9 100644
+--- a/src/FileSet.h
++++ b/src/FileSet.h
+@@ -49,6 +49,7 @@ struct FileTimestamp
+ 
+ class FileInfo
+ {
++   void def(unsigned m) { defined|=m; need&=~m; }
+ public:
+    xstring  name;
+    xstring  longname;
+@@ -69,7 +70,6 @@ public:
+    };
+    type	 filetype;
+ 
+-   int	 defined;
+    enum defined_bits
+    {
+       NAME=001,MODE=002,DATE=004,TYPE=010,SYMLINK_DEF=020,
+@@ -80,6 +80,8 @@ public:
+ 
+       ALL_INFO=NAME|MODE|DATE|TYPE|SYMLINK_DEF|SIZE|USER|GROUP|NLINKS
+    };
++   unsigned defined;
++   unsigned need;
+ 
+    int rank;
+ 
+@@ -89,18 +91,18 @@ public:
+    FileInfo(const char *n);
+    ~FileInfo();
+ 
+-   void SetName(const char *n) { name.set(n); defined|=NAME; }
++   void SetName(const char *n) { name.set(n); def(NAME); }
+    void SetUser(const char *n);
+    void SetGroup(const char *n);
+    void LocalFile(const char *name, bool follow_symlinks);
+    static FileInfo *parse_ls_line(const char *line,const char *tz);
+ 
+-   void SetMode(mode_t m) { mode=m; defined|=MODE; }
+-   void SetDate(time_t t,int prec) { date.set(t,prec); defined|=DATE; }
+-   void SetType(type t) { filetype=t; defined|=TYPE; }
+-   void SetSymlink(const char *s) { symlink.set(s); filetype=SYMLINK; defined|=TYPE|SYMLINK_DEF; }
+-   void	SetSize(off_t s) { size=s; defined|=SIZE; }
+-   void	SetNlink(int n) { nlinks=n; defined|=NLINKS; }
++   void SetMode(mode_t m) { mode=m; def(MODE); }
++   void SetDate(time_t t,int prec) { date.set(t,prec); def(DATE); }
++   void SetType(type t) { filetype=t; def(TYPE); }
++   void SetSymlink(const char *s) { symlink.set(s); filetype=SYMLINK; def(TYPE|SYMLINK_DEF); }
++   void	SetSize(off_t s) { size=s; def(SIZE); }
++   void	SetNlink(int n) { nlinks=n; def(NLINKS); }
+ 
+    void	 Merge(const FileInfo&);
+ 
+@@ -112,7 +114,7 @@ public:
+    bool  SizeOutside(const Range *r) const;
+ 
+    void	 SetAssociatedData(const void *d,int len) { data.nset((const char*)d,len); }
+-   const void *GetAssociatedData() { return data; }
++   const void *GetAssociatedData() const { return data; }
+ 
+    void SetRank(int r) { rank=r; }
+    int GetRank() const { return rank; }
+@@ -120,7 +122,14 @@ public:
+    void SetLongName(const char *s) { longname.set(s); }
+    const char *GetLongName() { if(!longname) MakeLongName(); return longname; }
+ 
+-   operator const char *() { return name; }
++   operator const char *() const { return name; }
++
++   bool Has(unsigned m) const { return defined&m; }
++   bool HasAny(unsigned m) const { return defined&m; }
++   bool HasAll(unsigned m) const { return (defined&m)==m; }
++
++   void Need(unsigned m) { need|=m; }
++   void NoNeed(unsigned m) { need&=~m; }
+ };
+ 
+ class PatternSet;
+diff --git a/src/Fish.cc b/src/Fish.cc
+index e995bb5..031f9c9 100644
+--- a/src/Fish.cc
++++ b/src/Fish.cc
+@@ -250,10 +250,7 @@ int Fish::Do()
+       }
+       if(RespQueueSize()==0)
+       {
+-	 if(mode==ARRAY_INFO && array_ptr<array_cnt)
+-	    SendArrayInfoRequests();
+-	 else
+-	    state=DONE;
++	 state=DONE;
+ 	 m=MOVED;
+       }
+       break;
+@@ -379,22 +376,16 @@ void Fish::Send(const char *format,...)
+ 
+ void Fish::SendArrayInfoRequests()
+ {
+-   for(int i=array_ptr; i<array_cnt; i++)
++   for(int i=fileset_for_info->curr_index(); i<fileset_for_info->count(); i++)
+    {
+-      if(array_for_info[i].get_time || array_for_info[i].get_size)
++      FileInfo *fi=(*fileset_for_info)[i];
++      if(fi->need)
+       {
+-	 const char *e=shell_encode(array_for_info[i].file);
++	 const char *e=shell_encode(fi->name);
+ 	 Send("#INFO %s\n"
+-	      "ls -lLd %s; echo '### 200'\n",array_for_info[i].file,e);
++	      "ls -lLd %s; echo '### 200'\n",fi->name.get(),e);
+ 	 PushExpect(EXPECT_INFO);
+       }
+-      else
+-      {
+-	 if(i==array_ptr)
+-	    array_ptr++;   // if it is first one, just skip it.
+-	 else
+-	    break;	   // otherwise, wait until it is first.
+-      }
+    }
+ }
+ 
+@@ -697,18 +688,12 @@ int Fish::HandleReplies()
+       break;
+    case EXPECT_INFO:
+    {
+-      FileInfo *fi=FileInfo::parse_ls_line(message,"GMT");
+-      if(fi && fi->defined&fi->SIZE)
+-	 array_for_info[array_ptr].size=fi->size;
+-      else
+-	 array_for_info[array_ptr].size=NO_SIZE;
+-      if(fi && fi->defined&fi->DATE)
+-	 array_for_info[array_ptr].time=fi->date;
+-      else
+-	 array_for_info[array_ptr].time=NO_DATE;
+-      array_for_info[array_ptr].get_size=false;
+-      array_for_info[array_ptr].get_time=false;
+-      array_ptr++;
++      Ref<FileInfo> new_info(FileInfo::parse_ls_line(message,"GMT"));
++      FileInfo *fi=fileset_for_info->curr();
++      while(!fi->need)
++	 fi=fileset_for_info->next();
++      fi->Merge(*new_info);
++      fi->need=0;
+       break;
+    }
+    case EXPECT_RETR:
+diff --git a/src/GetFileInfo.cc b/src/GetFileInfo.cc
+index 940e144..2fc28eb 100644
+--- a/src/GetFileInfo.cc
++++ b/src/GetFileInfo.cc
+@@ -386,23 +386,20 @@ int GetFileInfo::Do()
+    case GETTING_INFO_ARRAY:
+       if(session->IsClosed())
+       {
+-	 /* maybe FA::fileinfo should have "need" and a FileInfo?
+-	  *
++	 /*
+ 	  * Try to get requested information with GetInfoArray.  This
+ 	  * also serves as a last attempt to see if the file exists--we
+ 	  * only get here if everything else thinks the path doesn't exist.
+ 	  */
+-	 get_info.file=verify_fn;
+-	 get_info.size=NO_SIZE_YET;
+-	 get_info.get_size=need&FileInfo::SIZE;
+-	 get_info.time=NO_DATE_YET;
+-	 get_info.get_time=need&FileInfo::DATE;
++	 FileInfo *fi=new FileInfo(verify_fn);
++	 fi->need=need;
+ 
+ 	 /* We need to do at least one. */
+-	 if(!get_info.get_size && !get_info.get_time)
+-	    get_info.get_time=true;
+-
+-	 session->GetInfoArray(&get_info,1);
++	 if(!fi->need)
++	   fi->need=fi->DATE;
++	 get_info.Empty();
++	 get_info.Add(fi);
++	 session->GetInfoArray(&get_info);
+       }
+ 
+       res=session->Done();
+@@ -418,36 +415,26 @@ int GetFileInfo::Do()
+       }
+ 
+       session->Close();
+-      if(get_info.size==NO_SIZE && get_info.time==NO_DATE)
+-      {
+-	 /* We didn't get any information.  The file probably doesn't
+-	  * exist.  Not necessarily: it might have been a directory
+-	  * that we don't have access to CD into.  Some servers will
+-	  * refuse to give even an MDTM for directories.  We could
+-	  * scan the MDTM and/or SIZE responses for "not a plain file"
+-	  * for some servers (proftpd). */
+-	 state=CHANGE_DIR;
+-	 return MOVED;
+-      }
+ 
+       {
+-	 /* We got at least one, so the file exists. Fill in what we know. */
+-	 FileInfo *fi = new FileInfo(verify_fn);
+-	 was_directory = false;
+-
+-	 if(get_info.size!=NO_SIZE)
++	 FileInfo *fi=get_info[0];
++	 if(!fi->HasAny(fi->SIZE|fi->DATE))
+ 	 {
+-	    fi->SetSize(get_info.size);
+-	    /* We got the size, so it's probably a file.  It could be a link,
+-	     * though.  (If this is done, then always request size, even if we
+-	     * don't Need it.) */
+-	    // fi->SetType(fi->NORMAL);
++	    /* We didn't get any information.  The file probably doesn't
++	    * exist.  Not necessarily: it might have been a directory
++	    * that we don't have access to CD into.  Some servers will
++	    * refuse to give even an MDTM for directories.  We could
++	    * scan the MDTM and/or SIZE responses for "not a plain file"
++	    * for some servers (proftpd). */
++	    state=CHANGE_DIR;
++	    return MOVED;
+ 	 }
+-	 if(get_info.time!=NO_DATE)
+-	    fi->SetDate(get_info.time,0);
++
++	 /* We got at least one, so the file exists. Return what we know. */
++	 was_directory = false;
+ 
+ 	 result = new FileSet;
+-	 result->Add(fi);
++	 result->Add(new FileInfo(*fi));
+       }
+       state=DONE;
+       return MOVED;
+diff --git a/src/GetFileInfo.h b/src/GetFileInfo.h
+index b1a031d..059317e 100644
+--- a/src/GetFileInfo.h
++++ b/src/GetFileInfo.h
+@@ -63,7 +63,7 @@ class GetFileInfo : public ListInfo
+ 
+    xstring_c saved_error_text;
+ 
+-   FA::fileinfo get_info;
++   FileSet get_info;
+ 
+    void PrepareToDie();
+ 
+diff --git a/src/Http.cc b/src/Http.cc
+index 2c2c73e..1de7363 100644
+--- a/src/Http.cc
++++ b/src/Http.cc
+@@ -173,7 +173,7 @@ void Http::ResetRequestData()
+    sent_eot=false;
+    keep_alive=false;
+    keep_alive_max=-1;
+-   array_send=array_ptr;
++   array_send=fileset_for_info?fileset_for_info->curr_index():0;
+    chunked=false;
+    chunk_size=-1;
+    chunk_pos=0;
+@@ -675,10 +675,11 @@ void Http::SendArrayInfoRequest()
+       if(m==-1)
+ 	 m=100;
+    }
+-   while(array_send-array_ptr<m && array_send<array_cnt)
++   while(array_send-fileset_for_info->curr_index()<m
++   && array_send<fileset_for_info->count())
+    {
+-      SendRequest(array_send==array_cnt-1 ? 0 : "keep-alive",
+-	 array_for_info[array_send].file);
++      SendRequest(array_send==fileset_for_info->count()-1 ? 0 : "keep-alive",
++	 (*fileset_for_info)[array_send]->name);
+       array_send++;
+    }
+ }
+@@ -725,8 +726,8 @@ void Http::HandleHeaderLine(const char *name,const char *value)
+ 
+       if(mode==ARRAY_INFO && H_20X(status_code))
+       {
+-	 array_for_info[array_ptr].size=body_size;
+-	 array_for_info[array_ptr].get_size=false;
++	 FileInfo *fi=fileset_for_info->curr();
++	 fi->SetSize(body_size);
+ 	 TrySuccess();
+       }
+       return;
+@@ -763,8 +764,8 @@ void Http::HandleHeaderLine(const char *name,const char *value)
+ 
+       if(mode==ARRAY_INFO && H_20X(status_code))
+       {
+-	 array_for_info[array_ptr].time=t;
+-	 array_for_info[array_ptr].get_time=false;
++	 FileInfo *fi=fileset_for_info->curr();
++	 fi->SetDate(t,0);
+ 	 TrySuccess();
+       }
+       return;
+@@ -1223,12 +1224,8 @@ int Http::Do()
+ 		  // we'll have to receive next header
+ 		  status.set(0);
+ 		  status_code=0;
+-		  if(array_for_info[array_ptr].get_time)
+-		     array_for_info[array_ptr].time=NO_DATE;
+-		  if(array_for_info[array_ptr].get_size)
+-		     array_for_info[array_ptr].size=NO_SIZE;
+-		  if(++array_ptr>=array_cnt)
+-		  {
++		  if(!fileset_for_info->next())
++      {
+ 		     state=DONE;
+ 		     return MOVED;
+ 		  }
+diff --git a/src/LocalAccess.cc b/src/LocalAccess.cc
+index 8b25c7b..4fc29e3 100644
+--- a/src/LocalAccess.cc
++++ b/src/LocalAccess.cc
+@@ -293,21 +293,8 @@ int LocalAccess::Do()
+ 
+ void LocalAccess::fill_array_info()
+ {
+-   for(int i=0; i<array_cnt; i++)
+-   {
+-      fileinfo *f = &array_for_info[i];
+-      struct stat st;
+-      if(stat(dir_file(cwd,f->file),&st)!=-1)
+-      {
+-	 f->size=st.st_size;
+-	 f->time=st.st_mtime;
+-      }
+-      else
+-      {
+-	 f->size=NO_SIZE;
+-	 f->time=NO_DATE;
+-      }
+-   }
++   for(FileInfo *fi=fileset_for_info->curr(); fi; fi=fileset_for_info->next())
++      fi->LocalFile(fi->name,(fi->filetype!=fi->SYMLINK));
+ }
+ 
+ int LocalAccess::Read(void *buf,int size)
+diff --git a/src/NetAccess.cc b/src/NetAccess.cc
+index 20ab133..57eeebd 100644
+--- a/src/NetAccess.cc
++++ b/src/NetAccess.cc
+@@ -416,7 +416,7 @@ do_again:
+    if(done)
+       return m;
+ 
+-   if(!ubuf && !get_info)
++   if(!ubuf && !result)
+    {
+       const char *cache_buffer=0;
+       int cache_buffer_size=0;
+@@ -517,14 +517,12 @@ do_again:
+       result->rewind();
+       for(file=result->curr(); file!=0; file=result->next())
+       {
+-	 FA::fileinfo add;
+-	 add.size=NO_SIZE;
+-	 add.time=NO_DATE;
+-	 add.get_size = need_size && !(file->defined & file->SIZE);
+-	 add.get_time = need_time && (!(file->defined & file->DATE)
+-				 || (file->date.ts_prec>0 && can_get_prec_time));
+-	 add.is_dir=false;
+-	 add.file=0;
++	 file->need=0;
++	 if(need_size && !file->Has(file->SIZE))
++	    file->Need(file->SIZE);
++	 if(need_time && (!file->Has(file->DATE)
++				 || (file->date.ts_prec>0 && can_get_prec_time)))
++	 file->Need(file->DATE);
+ 
+ 	 if(file->defined & file->TYPE)
+ 	 {
+@@ -532,44 +530,29 @@ do_again:
+ 	    {
+ 	       //file->filetype=file->NORMAL;
+ 	       file->defined &= ~(file->SIZE|file->SYMLINK_DEF|file->MODE|file->DATE|file->TYPE);
+-	       add.get_size=true;
+-	       add.get_time=true;
++	       file->Need(file->SIZE|file->DATE);
+ 	    }
+-
+-	    if(file->filetype==file->SYMLINK)
++	    else if(file->filetype==file->SYMLINK)
+ 	    {
+ 	       // don't need these for symlinks
+-	       add.get_size=false;
+-	       add.get_time=false;
+-	    }
++	   file->NoNeed(file->SIZE|file->DATE);
++	   // but need the link target
++	   if(!file->Has(file->SYMLINK_DEF))
++	      file->Need(file->SYMLINK_DEF);
++	 }
+ 	    else if(file->filetype==file->DIRECTORY)
+ 	    {
+ 	       if(!get_time_for_dirs)
+ 		  continue;
+ 	       // don't need size for directories
+-	       add.get_size=false;
+-	       add.is_dir=true;
+-	    }
+-	 }
+-
+-	 if(add.get_size || add.get_time)
+-	 {
+-	    add.file=file->name;
+-	    if(!add.get_size)
+-	       add.size=NO_SIZE;
+-	    if(!add.get_time)
+-	       add.time=NO_DATE;
+-	    get_info.append(add);
+-	 }
++	       file->NoNeed(file->SIZE);
+       }
+-      if(get_info.count()==0)
+-      {
+-	 done=true;
+-	 return m;
++	 }
+       }
+-      session->GetInfoArray(get_info.get_non_const(),get_info.count());
++      session->GetInfoArray(result.get_non_const());
++      session->Roll();
+    }
+-   if(get_info)
++   if(session->OpenMode()==FA::ARRAY_INFO)
+    {
+       res=session->Done();
+       if(res==FA::DO_AGAIN)
+@@ -577,14 +560,6 @@ do_again:
+       if(res==FA::IN_PROGRESS)
+ 	 return m;
+       session->Close();
+-      for(int i=0; i<get_info.count(); i++)
+-      {
+-	 if(get_info[i].time!=NO_DATE)
+-	    result->SetDate(get_info[i].file,get_info[i].time,0);
+-	 if(get_info[i].size!=NO_SIZE)
+-	    result->SetSize(get_info[i].file,get_info[i].size);
+-      }
+-      get_info.unset();
+       done=true;
+       m=MOVED;
+    }
+@@ -605,7 +580,7 @@ const char *GenericParseListInfo::Status()
+       return xstring::format("%s (%lld) %s[%s]",_("Getting directory contents"),
+ 		     (long long)session->GetPos(),
+ 		     ubuf->GetRateStrS(),session->CurrentStatus());
+-   if(get_info)
++   if(session->OpenMode()==FA::ARRAY_INFO)
+       return xstring::format("%s (%d%%) [%s]",_("Getting files information"),
+ 		     session->InfoArrayPercentDone(),
+ 		     session->CurrentStatus());
+diff --git a/src/NetAccess.h b/src/NetAccess.h
+index 325f4f7..b189e58 100644
+--- a/src/NetAccess.h
++++ b/src/NetAccess.h
+@@ -114,8 +114,6 @@ public:
+ class GenericParseListInfo : public ListInfo
+ {
+ protected:
+-   xarray<FA::fileinfo> get_info;
+-
+    int mode;
+    SMTaskRef<IOBuffer> ubuf;
+ 
+diff --git a/src/SFtp.cc b/src/SFtp.cc
+index 9227f7d..812fa5c 100644
+--- a/src/SFtp.cc
++++ b/src/SFtp.cc
+@@ -328,6 +328,9 @@ void SFtp::Disconnect()
+    recv_translate=0;
+    ssh_id=0;
+    home_auto.set(FindHomeAuto());
++   // may have to resend file info queries.
++   if(fileset_for_info)
++      fileset_for_info->rewind();
+ }
+ 
+ void SFtp::Init()
+@@ -648,13 +651,17 @@ void SFtp::SendRequest()
+ 
+ void SFtp::SendArrayInfoRequests()
+ {
+-   while(array_ptr<array_cnt && RespQueueSize()<max_packets_in_flight)
++   for(FileInfo *fi=fileset_for_info->curr();
++       fi && RespQueueSize()<max_packets_in_flight;
++       fi=fileset_for_info->next())
+    {
+-      SendRequest(new Request_STAT(lc_to_utf8(dir_file(cwd,
+-	       array_for_info[array_ptr].file)),
+-	 SSH_FILEXFER_ATTR_SIZE|SSH_FILEXFER_ATTR_MODIFYTIME,
+-	 protocol_version),Expect::INFO,array_ptr);
+-      array_ptr++;
++      if(fi->need&(fi->SIZE|fi->DATE))
++        SendRequest(new Request_STAT(lc_to_utf8(dir_file(cwd,fi->name)),
++           SSH_FILEXFER_ATTR_SIZE|SSH_FILEXFER_ATTR_MODIFYTIME,
++           protocol_version),Expect::INFO,fileset_for_info->curr_index());
++      if(fi->need&fi->SYMLINK_DEF && protocol_version>=3)
++        SendRequest(new Request_READLINK(lc_to_utf8(dir_file(cwd,fi->name))),
++           Expect::INFO_READLINK,fileset_for_info->curr_index());
+    }
+    if(RespQueueIsEmpty())
+       state=DONE;
+@@ -947,10 +954,9 @@ void SFtp::HandleExpect(Expect *e)
+       }
+       if(mode==ARRAY_INFO)
+       {
+-	 array_for_info[e->i].size=entity_size;
+-	 array_for_info[e->i].get_size=false;
+-	 array_for_info[e->i].time=entity_date;
+-	 array_for_info[e->i].get_time=false;
++	 FileInfo *fi=(*fileset_for_info)[e->i];
++	 fi->SetSize(entity_size);
++	 fi->SetDate(entity_date,0);
+ 	 break;
+       }
+       if(opt_size)
+@@ -958,6 +964,18 @@ void SFtp::HandleExpect(Expect *e)
+       if(opt_date)
+ 	 *opt_date=entity_date;
+       break;
++   case Expect::INFO_READLINK:
++	 if(reply->TypeIs(SSH_FXP_NAME)) {
++	     Reply_NAME *r=(Reply_NAME*)reply;
++	     const NameAttrs *a=r->GetNameAttrs(0);
++	     LogNote(9,"file info: symlink=%s",a->name.get());
++	     if(mode==ARRAY_INFO)
++	     {
++		 FileInfo *fi=(*fileset_for_info)[e->i];
++		 fi->SetSymlink(a->name);
++	     }
++	 }
++	 break;
+    case Expect::WRITE_STATUS:
+       if(reply->TypeIs(SSH_FXP_STATUS))
+       {
+@@ -1121,6 +1139,7 @@ void SFtp::CloseExpectQueue()
+ 	 break;
+       case Expect::CWD:
+       case Expect::INFO:
++      case Expect::INFO_READLINK:
+       case Expect::DEFAULT:
+       case Expect::DATA:
+       case Expect::WRITE_STATUS:
+@@ -2158,7 +2177,7 @@ int SFtpListInfo::Do()
+    int m=STALL;
+    if(done)
+       return m;
+-   if(!ubuf)
++   if(!ubuf && !result)
+    {
+       const char *cache_buffer=0;
+       int cache_buffer_size=0;
+@@ -2185,28 +2204,66 @@ int SFtpListInfo::Do()
+ 	    ubuf->Save(FileAccess::cache->SizeLimit());
+       }
+    }
+-   const char *b;
+-   int len;
+-   ubuf->Get(&b,&len);
+-   if(b==0) // eof
+-   {
++   if(!result) {
++      const char *b;
++      int len;
++      ubuf->Get(&b,&len);
++      if(len>0)
++      {
++        ubuf->Skip(len);
++        return MOVED;
++      }
++      if(ubuf->Error())
++      {
++        SetError(ubuf->ErrorText());
++        return MOVED;
++      }
++      if(b)
++        return m;
++      // eof
+       if(!result && session->IsOpen())
+ 	 result=session.Cast<SFtp>()->GetFileSet();
+       FileAccess::cache->Add(session,"",FA::LONG_LIST,FA::OK,ubuf,result);
+       result->ExcludeDots();
+       result->Exclude(exclude_prefix,exclude);
+-      done=true;
+       m=MOVED;
+    }
+-   if(len>0)
++   if(result && session->OpenMode()!=FA::ARRAY_INFO)
+    {
+-      ubuf->Skip(len);
++      ubuf=0;
++      result->rewind();
++      for(FileInfo *file=result->curr(); file!=0; file=result->next())
++      {
++        file->need=0;
++        if(file->defined & file->TYPE)
++        {
++          if(file->filetype==file->SYMLINK && follow_symlinks)
++          {
++            file->defined &= ~(file->SIZE|file->SYMLINK_DEF|file->MODE|file->DATE|file->TYPE);
++            file->Need(file->SIZE|file->DATE);
++          }
++          else if(file->filetype==file->SYMLINK)
++          {
++            // need the link target
++            if(!file->Has(file->SYMLINK_DEF))
++               file->Need(file->SYMLINK_DEF);
++          }
++        }
++      }
++      session->GetInfoArray(result.get_non_const());
++      session->Roll();
+       m=MOVED;
+    }
+-   if(ubuf->Error())
++   if(session->OpenMode()==FA::ARRAY_INFO)
+    {
+-      SetError(ubuf->ErrorText());
+-      m=MOVED;
++       int res=session->Done();
++       if(res==FA::DO_AGAIN)
++         return m;
++       if(res==FA::IN_PROGRESS)
++         return m;
++       session->Close();
++       done=true;  
++       m=MOVED;
+    }
+    return m;
+ }
+diff --git a/src/SFtp.h b/src/SFtp.h
+index 4049e1a..f4a307c 100644
+--- a/src/SFtp.h
++++ b/src/SFtp.h
+@@ -55,8 +55,8 @@ enum packet_type {
+    SSH_FXP_RMDIR    =15,
+    SSH_FXP_REALPATH =16,
+    SSH_FXP_STAT     =17,
+-   SSH_FXP_RENAME   =18,
+-   SSH_FXP_READLINK =19,
++   SSH_FXP_RENAME   =18,   // v>=2
++   SSH_FXP_READLINK =19,   // v>=3
+    SSH_FXP_SYMLINK  =20,   // v<=5
+    SSH_FXP_LINK     =21,   // v>=6
+    SSH_FXP_BLOCK    =22,   // v>=6
+@@ -653,6 +653,11 @@ private:
+ 	 }
+       void Pack(Buffer *b);
+    };
++   class Request_READLINK : public PacketSTRING
++   {
++   public:
++      Request_READLINK(const char *name) : PacketSTRING(SSH_FXP_READLINK,name) {}
++   };
+ 
+    struct Expect;
+    friend struct SFtp::Expect; // grant access to Packet.
+@@ -667,6 +672,7 @@ private:
+ 	 HANDLE_STALE,
+ 	 DATA,
+ 	 INFO,
++	 INFO_READLINK,
+ 	 DEFAULT,
+ 	 WRITE_STATUS,
+ 	 IGNORE
+diff --git a/src/ftpclass.cc b/src/ftpclass.cc
+index 18a199d..6e77562 100644
+--- a/src/ftpclass.cc
++++ b/src/ftpclass.cc
+@@ -751,21 +751,22 @@ Ftp::pasv_state_t Ftp::Handle_EPSV()
+ 
+ void Ftp::CatchDATE(int act)
+ {
+-   if(!array_for_info)
++   if(!fileset_for_info)
++      return;
++
++   FileInfo *fi=fileset_for_info->curr();
++   if(!fi)
+       return;
+ 
+    if(is2XX(act))
+    {
+       if(line.length()>4 && is_ascii_digit(line[4]))
+-	 array_for_info[array_ptr].time=ConvertFtpDate(line+4);
+-      else
+-	 array_for_info[array_ptr].time=NO_DATE;
++	 fi->SetDate(ConvertFtpDate(line+4),0);
+    }
+    else	if(is5XX(act))
+    {
+       if(cmd_unsupported(act))
+ 	 conn->mdtm_supported=false;
+-      array_for_info[array_ptr].time=NO_DATE;
+    }
+    else
+    {
+@@ -773,9 +774,9 @@ void Ftp::CatchDATE(int act)
+       return;
+    }
+ 
+-   array_for_info[array_ptr].get_time=false;
+-   if(!array_for_info[array_ptr].get_size)
+-      array_ptr++;
++   fi->NoNeed(fi->DATE);
++   if(!(fi->need&fi->SIZE))
++     fileset_for_info->next();
+ 
+    TrySuccess();
+ }
+@@ -799,7 +800,11 @@ void Ftp::CatchDATE_opt(int act)
+ 
+ void Ftp::CatchSIZE(int act)
+ {
+-   if(!array_for_info)
++   if(!fileset_for_info)
++      return;
++
++   FileInfo *fi=fileset_for_info->curr();
++   if(!fi)
+       return;
+ 
+    long long size=NO_SIZE;
+@@ -822,14 +827,12 @@ void Ftp::CatchSIZE(int act)
+       return;
+    }
+ 
+-   if(size<1)
+-      size=NO_SIZE;
+-
+-   array_for_info[array_ptr].size=size;
++   if(size>=1)
++     fi->SetSize(size);
+ 
+-   array_for_info[array_ptr].get_size=false;
+-   if(!array_for_info[array_ptr].get_time)
+-      array_ptr++;
++   fi->NoNeed(fi->SIZE);
++   if(!(fi->need&fi->DATE))
++      fileset_for_info->next();   
+ 
+    TrySuccess();
+ }
+@@ -2327,7 +2330,7 @@ int   Ftp::Do()
+          return MOVED;
+ 
+       // more work to do?
+-      if(expect->IsEmpty() && mode==ARRAY_INFO && array_ptr<array_cnt)
++      if(expect->IsEmpty() && mode==ARRAY_INFO && fileset_for_info->curr())
+       {
+ 	 SendArrayInfoRequests();
+ 	 return MOVED;
+@@ -2550,35 +2553,28 @@ void Ftp::SendSiteGroup()
+ 
+ void Ftp::SendArrayInfoRequests()
+ {
+-   for(int i=array_ptr; i<array_cnt; i++)
++   for(int i=fileset_for_info->curr_index(); i<fileset_for_info->count(); i++)
+    {
++      FileInfo *fi=(*fileset_for_info)[i];
+       bool sent=false;
+-      if(array_for_info[i].get_time && conn->mdtm_supported && use_mdtm)
++      if((fi->need&fi->DATE) && conn->mdtm_supported && use_mdtm)
+       {
+-	 conn->SendCmd2("MDTM",ExpandTildeStatic(array_for_info[i].file));
++	 conn->SendCmd2("MDTM",ExpandTildeStatic(fi->name));
+ 	 expect->Push(Expect::MDTM);
+ 	 sent=true;
+       }
+-      else
+-      {
+-	 array_for_info[i].time=NO_DATE;
+-      }
+-      if(array_for_info[i].get_size && conn->size_supported && use_size)
++      if((fi->need&fi->SIZE) && conn->size_supported && use_size)
+       {
+-	 conn->SendCmd2("SIZE",ExpandTildeStatic(array_for_info[i].file));
++	 conn->SendCmd2("SIZE",ExpandTildeStatic(fi->name));
+ 	 expect->Push(Expect::SIZE);
+ 	 sent=true;
+       }
+-      else
+-      {
+-	 array_for_info[i].size=NO_SIZE;
+-      }
+       if(!sent)
+       {
+-	 if(i==array_ptr)
+-	    array_ptr++;   // if it is first one, just skip it.
++	 if(i==fileset_for_info->curr_index())
++	    fileset_for_info->next();   // if it is the first one, just skip it.
+ 	 else
+-	    break;	   // otherwise, wait until it is first.
++	    break;	   // otherwise, wait until it is the first.
+       }
+       else
+       {
+@@ -4343,7 +4339,7 @@ int   Ftp::Done()
+ 
+    if(mode==ARRAY_INFO)
+    {
+-      if(state==WAITING_STATE && expect->IsEmpty() && array_ptr==array_cnt)
++      if(state==WAITING_STATE && expect->IsEmpty() && !fileset_for_info->curr())
+ 	 return(OK);
+       return(IN_PROGRESS);
+    }

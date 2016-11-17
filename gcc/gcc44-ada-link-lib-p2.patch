@@ -1,0 +1,72 @@
+Index: b/src/gcc/ada/gcc-interface/Makefile.in
+===================================================================
+--- a/src/gcc/ada/gcc-interface/Makefile.in
++++ b/src/gcc/ada/gcc-interface/Makefile.in
+@@ -2068,36 +1942,49 @@
+ 		  $(RTSDIR)/memtrack.o
+ 		$(RANLIB_FOR_TARGET) $(RTSDIR)/libgmem$(arext)
+         endif
+-	$(CHMOD) a-wx $(RTSDIR)/*.ali
+ 	touch ../stamp-gnatlib-$(RTSDIR)
+ 
+ # Warning: this target assumes that LIBRARY_VERSION has been set correctly.
+-gnatlib-shared-default:
+-	$(MAKE) $(FLAGS_TO_PASS) \
+-             GNATLIBFLAGS="$(GNATLIBFLAGS)" \
+-	     GNATLIBCFLAGS="$(GNATLIBCFLAGS) $(TARGET_LIBGCC2_CFLAGS)" \
+-	     GNATLIBCFLAGS_FOR_C="$(GNATLIBCFLAGS_FOR_C)" \
+-	     MULTISUBDIR="$(MULTISUBDIR)" \
+-	     THREAD_KIND="$(THREAD_KIND)" \
+-             gnatlib
+-	$(RM) $(RTSDIR)/libgna*$(soext)
++gnatlib-shared-default: ../stamp-gnatlib1-$(RTSDIR)
++	$(MAKE) -C $(RTSDIR) \
++		CC="`echo \"$(GCC_FOR_TARGET)\" \
++		| sed -e 's,^\./xgcc,../../xgcc,' -e 's,-B\./,-B../../,'`" \
++	        INCLUDES="$(INCLUDES_FOR_SUBDIR) -I./../.." \
++                CFLAGS="$(GNATLIBCFLAGS_FOR_C)" \
++		srcdir=$(fsrcdir) \
++	        -f ../Makefile $(LIBGNAT_OBJS)
++	$(MAKE) -C $(RTSDIR) \
++		CC="`echo \"$(GCC_FOR_TARGET)\" \
++		| sed -e 's,^\./xgcc,../../xgcc,' -e 's,-B\./,-B../../,'`" \
++	        ADA_INCLUDES="" \
++                CFLAGS="$(GNATLIBCFLAGS) $(GNATLIBCFLAGS_FOR_C) $(TARGET_LIBGCC2_CFLAGS)" \
++	        ADAFLAGS="$(GNATLIBFLAGS)" \
++	        THREAD_KIND="$(THREAD_KIND)" \
++		srcdir=$(fsrcdir) \
++	        -f ../Makefile \
++	        $(GNATRTL_OBJS)
++	$(RM) $(RTSDIR)/libgna*$(soext) $(RTSDIR)/libgna*$(soext).1
+ 	cd $(RTSDIR); ../../xgcc -B../../ -shared $(GNATLIBCFLAGS) \
+ 		$(TARGET_LIBGCC2_CFLAGS) \
+-		-o libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		-o libgnat$(hyphen)$(LIBRARY_VERSION)$(soext).1 \
+ 		$(GNATRTL_NONTASKING_OBJS) $(LIBGNAT_OBJS) \
+ 		g-trasym.o convert_addresses.o \
+-		$(SO_OPTS)libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		$(SO_OPTS)libgnat$(hyphen)$(LIBRARY_VERSION)$(soext).1 \
+ 		$(MISCLIB) -lm
+ 	cd $(RTSDIR); ../../xgcc -B../../ -shared $(GNATLIBCFLAGS) \
+ 		$(TARGET_LIBGCC2_CFLAGS) \
+-		-o libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		-o libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext).1 \
+ 		$(GNATRTL_TASKING_OBJS) \
+-		$(SO_OPTS)libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		$(SO_OPTS)libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext).1 \
+ 		$(THREADSLIB)
+-	cd $(RTSDIR); $(LN_S) libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
+-		libgnat$(soext)
+-	cd $(RTSDIR); $(LN_S) libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
+-		libgnarl$(soext)
++	cd $(RTSDIR); for lib in gnat gnarl; do \
++		l=lib$${lib}$(hyphen)$(LIBRARY_VERSION)$(soext); \
++		$(LN_S) $$l.1 $$l; \
++	done
++# Delete the object files, lest they be linked statically into the tools
++# executables.  Only the .ali, .a and .so files must remain.
++	rm -f $(RTSDIR)/*.o
++	$(CHMOD) a-wx $(RTSDIR)/*.ali
+ 
+ gnatlib-shared-dual:
+ 	$(MAKE) $(FLAGS_TO_PASS) \

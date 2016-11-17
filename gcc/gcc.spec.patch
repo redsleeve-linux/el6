@@ -1,0 +1,13 @@
+--- gcc.spec.org	2016-09-25 17:56:55.411211887 +0000
++++ gcc.spec	2016-09-25 18:06:07.253300924 +0000
+@@ -1683,6 +1683,10 @@
+ %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/libgomp.spec
+ %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/libgomp.a
+ %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/libgomp.so
++%ifarch %{arm}
++%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/include/mmintrin.h
++%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/include/arm_neon.h
++%endif
+ %ifarch sparcv9 ppc
+ %dir %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/64
+ %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_version}/64/crt*.o

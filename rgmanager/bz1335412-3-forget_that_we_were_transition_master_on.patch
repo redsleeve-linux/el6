@@ -1,0 +1,58 @@
+From 441bff8b11c094f5a005a6202b2bf9e7e39946a5 Mon Sep 17 00:00:00 2001
+From: Ryan McCabe <rmccabe@redhat.com>
+Date: Thu, 9 Jun 2016 10:53:29 -0400
+Subject: [PATCH] rgmanager: Forgot that we were transition master on
+ quorum loss
+
+Clear the _master flag if we lose quorum, so that in the event quorum is
+regained and we lose the race for the transition-master lock, we do not
+wrongly think we're still master.
+
+Resolves: rhbz#1084053
+---
+ rgmanager/include/event.h        | 1 +
+ rgmanager/src/daemons/main.c     | 1 +
+ rgmanager/src/daemons/rg_event.c | 3 +++
+ 3 files changed, 5 insertions(+)
+
+diff --git a/rgmanager/include/event.h b/rgmanager/include/event.h
+index 9fc9521..1442a64 100644
+--- a/rgmanager/include/event.h
++++ b/rgmanager/include/event.h
+@@ -120,6 +120,7 @@ int slang_process_event(event_table_t *event_table, event_t *ev);
+ /* For distributed events. */
+ void set_transition_throttling(int nsecs);
+ int get_transition_throttling(void);
++void drop_event_master(void);
+ 
+ /* Simplified service start. */
+ int service_op_start(char *svcName, int *target_list, int target_list_len,
+diff --git a/rgmanager/src/daemons/main.c b/rgmanager/src/daemons/main.c
+index 127015b..6f0b39f 100644
+--- a/rgmanager/src/daemons/main.c
++++ b/rgmanager/src/daemons/main.c
+@@ -136,6 +136,7 @@ membership_update(void)
+ 		logt_print(LOG_DEBUG, "Flushing resource group cache\n");
+ 		kill_resource_groups();
+ 		rg_clear_initialized(0);
++		drop_event_master();
+ 		return -1;
+ 	} else if (!rg_quorate()) {
+ 
+diff --git a/rgmanager/src/daemons/rg_event.c b/rgmanager/src/daemons/rg_event.c
+index 4a747e0..1814c60 100644
+--- a/rgmanager/src/daemons/rg_event.c
++++ b/rgmanager/src/daemons/rg_event.c
+@@ -46,6 +46,9 @@ void flag_reconfigure(int sig);
+ 
+ event_table_t *master_event_table = NULL;
+ 
++void drop_event_master(void) {
++	_master = 0;
++}
+ 
+ void
+ set_transition_throttling(int nsecs)
+-- 
+2.5.5
+

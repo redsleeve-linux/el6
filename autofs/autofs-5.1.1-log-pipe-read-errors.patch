@@ -1,0 +1,76 @@
+autofs-5.1.1 - log pipe read errors
+
+From: Ian Kent <raven@themaw.net>
+
+Log any unexpected pipe read (possible error) returns.
+
+Signed-off-by: Ian Kent <raven@themaw.net>
+---
+ CHANGELOG          |    1 +
+ daemon/automount.c |   24 ++++++++++++++++++++----
+ 2 files changed, 21 insertions(+), 4 deletions(-)
+
+--- autofs-5.0.5.orig/CHANGELOG
++++ autofs-5.0.5/CHANGELOG
+@@ -291,6 +291,7 @@
+ - don't schedule new alarms after readmap.
+ - always set direct mounts catatonic at exit.
+ - fix error handing in do_mount_indirect().
++- log pipe read errors.
+ 
+ 03/09/2009 autofs-5.0.5
+ -----------------------
+--- autofs-5.0.5.orig/daemon/automount.c
++++ autofs-5.0.5/daemon/automount.c
+@@ -962,6 +962,8 @@ static int get_pkt(struct autofs_point *
+ 	struct pollfd fds[3];
+ 	int pollfds = 3;
+ 	char buf[MAX_ERR_BUF];
++	size_t read;
++	char *estr;
+ 
+ 	fds[0].fd = ap->pipefd;
+ 	fds[0].events = POLLIN;
+@@ -974,7 +976,6 @@ static int get_pkt(struct autofs_point *
+ 
+ 	for (;;) {
+ 		if (poll(fds, pollfds, -1) == -1) {
+-			char *estr;
+ 			if (errno == EINTR)
+ 				continue;
+ 			estr = strerror_r(errno, buf, MAX_ERR_BUF);
+@@ -993,7 +994,13 @@ static int get_pkt(struct autofs_point *
+ 
+ 			state_pipe = ap->state_pipe[0];
+ 
+-			if (fullread(state_pipe, &next_state, read_size)) {
++			read = fullread(state_pipe, &next_state, read_size);
++			if (read) {
++				estr = strerror_r(errno, buf, MAX_ERR_BUF);
++				error(ap->logopt,
++				      "read error on state pipe, "
++				      "read %u, error %s",
++				      read, estr);
+ 				st_mutex_unlock();
+ 				continue;
+ 			}
+@@ -1004,8 +1011,17 @@ static int get_pkt(struct autofs_point *
+ 				return -1;
+ 		}
+ 
+-		if (fds[0].revents & POLLIN)
+-			return fullread(ap->pipefd, pkt, kpkt_len);
++		if (fds[0].revents & POLLIN) {
++			read = fullread(ap->pipefd, pkt, kpkt_len);
++			if (read) {
++				estr = strerror_r(errno, buf, MAX_ERR_BUF);
++				error(ap->logopt,
++				      "read error on request pipe, "
++				      "read %u, expected %u error %s",
++				       read, kpkt_len, estr);
++			}
++			return read;
++		}
+ 
+ 		if (fds[2].fd != -1 && fds[2].revents & POLLIN) {
+ 			debug(ap->logopt, "message pending on control fifo.");

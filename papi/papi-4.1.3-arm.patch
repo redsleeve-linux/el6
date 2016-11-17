@@ -1,0 +1,252 @@
+--- sys_perf_event_open.c.org	2011-05-03 17:16:48.000000000 +0000
++++ sys_perf_event_open.c	2016-10-29 22:03:21.860229223 +0000
+@@ -15,6 +15,8 @@
+ #define __NR_perf_event_open	298
+ #elif defined(__i386__)
+ #define __NR_perf_event_open	336
++#elif defined(__arm__)
++#define __NR_perf_event_open	364
+ #endif
+ 
+ extern int _papi_hwi_debug;
+--- linux-lock.h.org	2011-02-23 22:59:07.000000000 +0000
++++ linux-lock.h	2016-10-29 23:31:43.200778975 +0000
+@@ -76,6 +76,62 @@
+   unsigned int retval;                                 \
+   retval = papi_xchg_u32(&_papi_hwd_lock_data[lck],MUTEX_OPEN); \
+ } while(0)
++
++/*******************/
++/* ARM             */
++/*******************/
++
++#elif defined(__arm__)
++
++#if 0
++
++/* OLD CODE FROM VINCE BELOW */
++
++/* FIXME */
++/* not sure if this even works            */
++/* also the various flavors of ARM        */
++/* have differing levels of atomic        */
++/* instruction support.  A proper         */
++/* implementation needs to handle this :( */
++
++#warning "WARNING!  Verify mutexes work on ARM!"
++
++/*
++ *  * For arm/gcc, 0 is clear, 1 is set.
++ *   */
++#define MUTEX_SET(tsl) ({      \
++  int __r;                     \
++  asm volatile(                \
++  "swpb   %0, %1, [%2]\n\t"    \
++  "eor    %0, %0, #1\n\t"      \
++  : "=&r" (__r)                \
++  : "r" (1), "r" (tsl)         \
++  );                           \
++  __r & 1;                     \
++    })
++
++#define  _papi_hwd_lock(lck) MUTEX_SET(lck)
++#define  _papi_hwd_unlock(lck) (*(volatile int *)(lck) = 0)
++#endif
++
++/* NEW CODE FROM PHIL */
++
++static inline int __arm_papi_spin_lock (volatile unsigned int *lock)
++{
++  unsigned int val;
++
++  do
++    asm volatile ("swp %0, %1, [%2]"
++                  : "=r" (val)
++                  : "0" (1), "r" (lock)
++                  : "memory");
++  while (val != 0);
++
++  return 0;
++}
++#define _papi_hwd_lock(lck)   { rmb(); __arm_papi_spin_lock(&_papi_hwd_lock_data[lck]); rmb(); }
++#define _papi_hwd_unlock(lck) { rmb(); _papi_hwd_lock_data[lck] = 0; rmb(); }
++
+ #elif defined(__sparc__)
+ static inline void
+ __raw_spin_lock( volatile unsigned int *lock )
+--- linux-context.h.org	2011-02-23 22:59:07.000000000 +0000
++++ linux-context.h	2016-10-29 23:39:31.064254849 +0000
+@@ -23,6 +23,8 @@
+ #define OVERFLOW_ADDRESS(ctx) ctx.ucontext->uc_mcontext.uc_regs->gregs[REG_NIP]
+ #elif defined(__powerpc64__)
+ #define OVERFLOW_ADDRESS(ctx) ctx.ucontext->uc_mcontext.regs->nip
++#elif defined(__arm__)
++#define OVERFLOW_ADDRESS(ctx) ctx.ucontext->uc_mcontext.arm_pc
+ #elif defined(__sparc__)
+ #define OVERFLOW_ADDRESS(ctx) ((struct sigcontext *)ctx.ucontext)->si_regs.pc
+ #else
+--- linux-memory.c.org	2011-04-14 18:37:21.000000000 +0000
++++ linux-memory.c	2016-10-29 23:55:39.673364953 +0000
+@@ -816,6 +816,20 @@
+ }
+ #endif
+ 
++/* FIXME:  have code read the /sys/ cpu files to gather cache info */
++/*         in cases where we can't otherwise get cache size data   */
++
++int
++generic_get_memory_info( PAPI_hw_info_t * hw_info )
++{
++
++
++        /* Now fetch the cache info */
++        hw_info->mem_hierarchy.levels = 0;
++
++        return 0;
++}
++
+ int
+ _linux_get_memory_info( PAPI_hw_info_t * hwinfo, int cpu_type )
+ {
+@@ -830,6 +844,9 @@
+ 	ppc64_get_memory_info( hwinfo );
+ #elif defined(__sparc__)
+ 	sparc_get_memory_info( hwinfo );
++#elif defined(__arm__)
++	#warning "WARNING! linux_get_memory_info() does nothing on ARM!"
++	generic_get_memory_info (hwinfo);
+ #else
+ #error "No support for this architecture. Please modify linux-memory.c"
+ #endif
+--- Makefile.inc.org	2016-10-29 19:52:08.000000000 +0000
++++ Makefile.inc	2016-10-30 00:09:07.000175094 +0000
+@@ -8,7 +8,7 @@
+     papi_fwrappers.o papi_fwrappers_.o papi_fwrappers__.o PAPI_FWRAPPERS.o \
+     papi_data.o threads.o cpus.o $(MEMSUBSTR)-memory.o $(SUBSTR).o papi_preset.o \
+     papi_vector.o papi_memory.o freq.o $(COMPOBJS) $(MISCOBJS)
+-HEADERS   = $(MISCHDRS) papi.h papi_internal.h papiStdEventDefs.h $(SUBSTR).h \
++HEADERS   = $(MISCHDRS) mb.h cycle.h papi.h papi_internal.h papiStdEventDefs.h $(SUBSTR).h \
+     papi_preset.h threads.h cpus.h papi_protos.h papi_vector.h \
+     papi_memory.h config.h
+ LIBCFLAGS += -I. $(CFLAGS) -DSUBSTRATE=\"$(SUBSTR).h\" 
+--- papi_lock.h.org	2010-08-03 16:24:31.000000000 +0000
++++ papi_lock.h	2016-10-30 00:53:40.176065190 +0000
+@@ -102,6 +102,22 @@
+    __asm__ __volatile__ ("xchg %0,%1" : "=r"(res) : "m"(_papi_hwd_lock_data[lck]), "0"(MUTEX_OPEN) : "memory");                                \
+ } while(0)
+ 
++#elif defined(__arm__)
++#include "mb.h"
++static inline int __arm_papi_spin_lock (volatile unsigned int *lock)
++{
++  unsigned int val;
++  do
++    asm volatile ("swp %0, %1, [%2]"
++                  : "=r" (val)
++                  : "0" (1), "r" (lock)
++                  : "memory");
++  while (val != 0);
++  return 0;
++}
++#define _papi_hwd_lock(lck)   { rmb(); __arm_papi_spin_lock(&_papi_hwd_lock_data[lck]); rmb(); }
++#define _papi_hwd_unlock(lck) { rmb(); _papi_hwd_lock_data[lck] = 0; rmb(); }
++
+ #elif defined(__powerpc__)
+ 
+ /*
+--- threads.h.org	2010-08-04 20:51:46.000000000 +0000
++++ threads.h	2016-10-30 01:11:51.050687029 +0000
+@@ -13,6 +13,7 @@
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <unistd.h>
++#include "mb.h"
+ 
+ #ifdef HAVE_THREAD_LOCAL_STORAGE
+ #define THREAD_LOCAL_STORAGE_KEYWORD HAVE_THREAD_LOCAL_STORAGE
+--- cycle.h.org	2010-11-03 14:38:20.000000000 +0000
++++ cycle.h	2016-10-30 01:44:04.890712959 +0000
+@@ -503,3 +503,19 @@
+ #define HAVE_TICK_COUNTER
+ #endif
+ #endif /* HAVE_MIPS_ZBUS_TIMER */
++/* arm */
++#if defined(__arm__) && !defined(HAVE_TICK_COUNTER)
++typedef unsigned long ticks;
++
++static __inline__ ticks
++getticks( void )
++{
++        ticks ret;
++
++        return ret;
++}
++
++INLINE_ELAPSED( __inline__ )
++#define HAVE_TICK_COUNTER
++#endif /* arm */
++
+--- perf_events.c.org	2011-05-13 15:49:06.000000000 +0000
++++ perf_events.c	2016-10-30 01:52:57.173725785 +0000
+@@ -11,6 +11,7 @@
+ */
+ 
+ 
++#include "mb.h"
+ #include <fcntl.h>
+ #include <string.h>
+ #include <errno.h>
+@@ -26,7 +27,6 @@
+ #include "papi_vector.h"
+ #include "papi_memory.h"
+ #include "papi_pfm_events.h"
+-#include "mb.h"
+ #include "syscalls.h"
+ 
+ #include "linux-memory.h"
+--- linux-timer.c.org	2011-03-09 16:50:21.000000000 +0000
++++ linux-timer.c	2016-10-30 02:07:04.332409274 +0000
+@@ -175,7 +175,7 @@
+ 						  :"=r"( ret ) );
+ 	return ret;
+ }
+-#elif defined(__powerpc__)
++#elif (defined(__powerpc__) || defined(__arm__) || defined(__mips__))
+ /*
+  * It's not possible to read the cycles from user space on ppc970.
+  * There is a 64-bit time-base register (TBU|TBL), but its
+@@ -216,7 +216,7 @@
+ _linux_get_real_cycles( void )
+ {
+ 	long long retval;
+-#if defined(HAVE_GETTIMEOFDAY)||defined(__powerpc__)
++#if defined(HAVE_GETTIMEOFDAY)||defined(__powerpc__)||defined(__arm__)||defined(__mips__)
+ 	retval =
+ 		_linux_get_real_usec(  ) *
+ 		( long long ) _papi_hwi_system_info.hw_info.mhz;
+--- mb.h.org	2009-08-27 00:40:13.000000000 +0000
++++ mb.h	2016-10-30 13:36:52.895731166 +0000
+@@ -5,6 +5,23 @@
+ #define mb()   __asm__ __volatile__ ("sync" : : : "memory")
+ #define rmb()  __asm__ __volatile__ ("sync" : : : "memory")
+ #define wmb()  __asm__ __volatile__ ("sync" : : : "memory")
++#elif defined(__arm__)
++/*
++ *  * Use the __kuser_memory_barrier helper in the CPU helper page. See
++ *   * arch/arm/kernel/entry-armv.S in the kernel source for details.
++ *    */
++
++/* Copied from linux/compiler-gcc.h since we can't include it directly */
++#define barrier() __asm__ __volatile__("": : :"memory")
++
++#ifndef arch_is_coherent
++#define arch_is_coherent()              0
++#endif
++
++#define rmb()           ((void(*)(void))0xffff0fa0)()
++#define dmb() __asm__ __volatile__ ("mcr p15, 0, %0, c7, c10, 5" \
++                                    : : "r" (0) : "memory")
++#define mb()    do { if (arch_is_coherent()) dmb(); else barrier(); } while (0)
+ #elif defined(__x86_64__) || defined(__i386__)
+ #ifdef CONFIG_X86_32
+ /*

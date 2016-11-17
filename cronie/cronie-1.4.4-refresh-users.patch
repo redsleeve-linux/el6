@@ -1,0 +1,222 @@
+diff -up cronie-1.4.4/src/cron.c.refresh-users cronie-1.4.4/src/cron.c
+--- cronie-1.4.4/src/cron.c.refresh-users	2016-05-12 13:50:17.395490588 +0200
++++ cronie-1.4.4/src/cron.c	2016-05-12 13:53:56.897613859 +0200
+@@ -461,8 +461,6 @@ static void find_jobs(int vtime, cron_db
+ 	int minute, hour, dom, month, dow;
+ 	user *u;
+ 	entry *e;
+-	const char *uname;
+-	struct passwd *pw = NULL;
+ 
+ 	/* The support for the job-specific timezones is not perfect. There will
+ 	* be jobs missed or run twice during the DST change in the job timezone.
+@@ -499,16 +497,11 @@ static void find_jobs(int vtime, cron_db
+ 		 */
+ 		for (u = db->head; u != NULL; u = u->next) {
+ 		for (e = u->crontab; e != NULL; e = e->next) {
+-			Debug(DSCH | DEXT, ("user [%s:%ld:%ld:...] cmd=\"%s\"\n",
+-					e->pwd->pw_name, (long) e->pwd->pw_uid,
+-					(long) e->pwd->pw_gid, e->cmd))
+-				uname = e->pwd->pw_name;
+-			/* check if user exists in time of job is being run f.e. ldap */
+-			if ((pw = getpwnam(uname)) != NULL) {
+ 				time_t virtualSecond = (vtime - e->delay) * SECONDS_PER_MINUTE;
+ 				time_t virtualGMTSecond = virtualSecond - vGMToff;
+ 				job_tz = env_get("CRON_TZ", e->envp);
+ 				maketime(job_tz, orig_tz);
++
+ 				/* here we test whether time is NOW */
+ 				if (bit_test(e->minute, minute) &&
+ 					bit_test(e->hour, hour) &&
+@@ -530,11 +523,7 @@ static void find_jobs(int vtime, cron_db
+ 						job_add(e, u);	/*will add job, if it isn't in queue already for NOW. */
+ 				}
+ 			}
+-			else {
+-				log_it(uname, getpid(), "ERROR", "getpwnam() failed", errno);
+-			}
+ 		}
+-	}
+ 	if (orig_tz != NULL)
+ 		setenv("TZ", orig_tz, 1);
+ 	else
+diff -up cronie-1.4.4/src/database.c.refresh-users cronie-1.4.4/src/database.c
+--- cronie-1.4.4/src/database.c.refresh-users	2015-09-21 14:12:31.814575457 +0200
++++ cronie-1.4.4/src/database.c	2016-05-12 13:50:17.396490612 +0200
+@@ -129,10 +129,41 @@ check_orphans(cron_db *db) {
+ 	}
+ }
+ 
++static int
++find_orphan(const char *uname, const char *fname, const char *tabname) {
++	orphan *o;
++
++	for (o = orphans; o != NULL; o = o->next) {
++		if (uname && o->uname) {
++			if (strcmp(uname, o->uname) != 0)
++				continue;
++		} else if (uname != o->uname)
++			continue;
++
++		if (fname && o->fname) {
++			if (strcmp(fname, o->fname) != 0)
++				continue;
++		} else if (fname != o->fname)
++			continue;
++
++		if (tabname && o->tabname) {
++			if (strcmp(tabname, o->tabname) != 0)
++				continue;
++		} else if (tabname != o->tabname)
++			continue;
++		return 1;
++	}
++
++	return 0;
++}
++
+ static void
+ add_orphan(const char *uname, const char *fname, const char *tabname) {
+ 	orphan *o;
+ 
++	if (find_orphan(uname, fname, tabname))
++		return;
++
+ 	o = calloc(1, sizeof(*o));
+ 	if (o == NULL)
+ 		return;
+diff -up cronie-1.4.4/src/entry.c.refresh-users cronie-1.4.4/src/entry.c
+--- cronie-1.4.4/src/entry.c.refresh-users	2015-09-21 14:12:31.827575757 +0200
++++ cronie-1.4.4/src/entry.c	2016-05-12 13:57:51.285084560 +0200
+@@ -85,6 +85,7 @@ entry *load_entry(FILE * file, void (*er
+ 	char envstr[MAX_ENVSTR];
+ 	char **tenvp;
+ 	char *p;
++	struct passwd temppw;
+ 
+ 	Debug(DPARS, ("load_entry()...about to eat comments\n"))
+ 
+@@ -253,11 +254,15 @@ entry *load_entry(FILE * file, void (*er
+ 
+ 		pw = getpwnam(username);
+ 		if (pw == NULL) {
+-			ecode = e_username;
+-			goto eof;
++			Debug(DPARS, ("load_entry()...unknown user entry\n"));
++			memset(&temppw, 0, sizeof (temppw));
++			temppw.pw_name = username;
++			temppw.pw_passwd = "";
++			pw = &temppw;
++		} else {
++			Debug(DPARS, ("load_entry()...uid %ld, gid %ld\n",
++				(long) pw->pw_uid, (long) pw->pw_gid));
+ 		}
+-		Debug(DPARS, ("load_entry()...uid %ld, gid %ld\n",
+-				(long) pw->pw_uid, (long) pw->pw_gid))
+ 	}
+ 
+ 	if ((e->pwd = pw_dup(pw)) == NULL) {
+@@ -297,17 +302,11 @@ entry *load_entry(FILE * file, void (*er
+ 		else
+ 			log_it("CRON", getpid(), "error", "can't set SHELL", 0);
+ 	}
+-	if (!env_get("HOME", e->envp)) {
+-		if (glue_strings(envstr, sizeof envstr, "HOME", pw->pw_dir, '=')) {
+-			if ((tenvp = env_set(e->envp, envstr)) == NULL) {
+-				ecode = e_memory;
+-				goto eof;
+-			}
+-			e->envp = tenvp;
+-		}
+-		else
+-			log_it("CRON", getpid(), "error", "can't set HOME", 0);
++	if ((tenvp = env_update_home(e->envp, pw->pw_dir)) == NULL) {
++		ecode = e_memory;
++		goto eof;
+ 	}
++	e->envp = tenvp;
+ #ifndef LOGIN_CAP
+ 	/* If login.conf is in used we will get the default PATH later. */
+ 	if (ChangePath && !env_get("PATH", e->envp)) {
+diff -up cronie-1.4.4/src/env.c.refresh-users cronie-1.4.4/src/env.c
+--- cronie-1.4.4/src/env.c.refresh-users	2015-09-21 14:12:31.830575826 +0200
++++ cronie-1.4.4/src/env.c	2016-05-12 13:50:17.398490658 +0200
+@@ -284,3 +284,19 @@ char *env_get(char *name, char **envp) {
+ 	}
+ 	return (NULL);
+ }
++
++char **env_update_home(char **envp, const char *dir) {
++	char envstr[MAX_ENVSTR];
++
++	if (dir == NULL || *dir == '\0' || env_get("HOME", envp)) {
++		return envp;
++	}
++
++	if (glue_strings(envstr, sizeof envstr, "HOME", dir, '=')) {
++		envp = env_set(envp, envstr);
++	}			
++	else
++		log_it("CRON", getpid(), "ERROR", "can't set HOME", 0);
++
++	return envp;
++}
+diff -up cronie-1.4.4/src/funcs.h.refresh-users cronie-1.4.4/src/funcs.h
+--- cronie-1.4.4/src/funcs.h.refresh-users	2015-09-21 14:12:31.824575687 +0200
++++ cronie-1.4.4/src/funcs.h	2016-05-12 13:50:17.399490682 +0200
+@@ -70,7 +70,8 @@ char		*env_get(char *, char **),
+ 		*first_word(char *, char *),
+ 		**env_init(void),
+ 		**env_copy(char **),
+-		**env_set(char **, const char *);
++		**env_set(char **, const char *),
++		**env_update_home(char **, const char *);
+ 
+ user		*load_user(int, struct passwd *, const char *, const char *, const char *),
+ 		*find_user(cron_db *, const char *, const char *);
+diff -up cronie-1.4.4/src/job.c.refresh-users cronie-1.4.4/src/job.c
+--- cronie-1.4.4/src/job.c.refresh-users	2009-09-25 08:23:18.000000000 +0200
++++ cronie-1.4.4/src/job.c	2016-05-12 13:50:17.399490682 +0200
+@@ -31,12 +31,42 @@ static job *jhead = NULL, *jtail = NULL;
+ 
+ void job_add(entry * e, user * u) {
+ 	job *j;
++	struct passwd *newpwd;
++	struct passwd *temppwd;
++	const char *uname;
+ 
+ 	/* if already on queue, keep going */
+ 	for (j = jhead; j != NULL; j = j->next)
+ 		if (j->e == e && j->u == u)
+ 			return;
+ 
++	uname = e->pwd->pw_name;
++	/* check if user exists in time of job is being run f.e. ldap */
++	if ((temppwd = getpwnam(uname)) != NULL) {
++		char **tenvp;
++
++		Debug(DSCH | DEXT, ("user [%s:%ld:%ld:...] cmd=\"%s\"\n",
++				e->pwd->pw_name, (long) temppwd->pw_uid,
++				(long) temppwd->pw_gid, e->cmd));
++		if ((newpwd = pw_dup(temppwd)) == NULL) {
++			log_it(uname, getpid(), "ERROR", "memory allocation failed", errno);
++			return;
++		}
++		free(e->pwd);
++		e->pwd = newpwd;
++
++		if ((tenvp = env_update_home(e->envp, e->pwd->pw_dir)) == NULL) {
++			log_it(uname, getpid(), "ERROR", "memory allocation failed", errno);
++			return;
++		}
++		e->envp = tenvp;
++	} else {
++		log_it(uname, getpid(), "ERROR", "getpwnam() failed",errno);
++		Debug(DSCH | DEXT, ("%s:%d pid=%d time=%ld getpwnam(%s) failed errno=%d error=%s\n",
++			__FILE__,__LINE__,getpid(),time(NULL),uname,errno,strerror(errno)));
++		return;
++	}
++
+ 	/* build a job queue element */
+ 	if ((j = (job *) malloc(sizeof (job))) == NULL)
+ 		return;

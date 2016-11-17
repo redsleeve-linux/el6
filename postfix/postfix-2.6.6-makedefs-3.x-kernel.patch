@@ -1,0 +1,12 @@
+diff -ru postfix-2.6.6-orig/makedefs postfix-2.6.6/makedefs
+--- postfix-2.6.6-orig/makedefs	2009-10-19 02:30:12.000000000 +0200
++++ postfix-2.6.6/makedefs	2014-12-07 19:13:36.563287000 +0100
+@@ -254,7 +254,7 @@
+     Linux.1*)	SYSTYPE=LINUX1
+ 		SYSLIBS="-ldb"
+ 		;;
+-    Linux.2*)	SYSTYPE=LINUX2
++    Linux.2*|Linux.3*)	SYSTYPE=LINUX2
+ 		# Postfix no longer needs DB 1.85 compatibility
+ 		if [ -f /usr/include/db.h ]
+ 		then

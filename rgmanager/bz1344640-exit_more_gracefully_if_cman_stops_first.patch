@@ -1,0 +1,59 @@
+From 3ad66bb1d801147eee80f68afc543429b3a2f0d2 Mon Sep 17 00:00:00 2001
+From: Ryan McCabe <rmccabe@redhat.com>
+Date: Thu, 9 Jun 2016 11:06:41 -0400
+Subject: [PATCH] rgmanager: Exit more gracefully if cman stops first
+
+Try to avoid raising signal 11 if cman exits before rgmanager and
+cpg locks are being used.
+
+Patch from John Ruemker <jruemker@redhat.com>
+Resolves: rhbz#1342825
+
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ rgmanager/src/clulib/cpg_lock.c | 9 ++++++++-
+ rgmanager/src/daemons/main.c    | 1 +
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/rgmanager/src/clulib/cpg_lock.c b/rgmanager/src/clulib/cpg_lock.c
+index 7c1c8c3..e709648 100644
+--- a/rgmanager/src/clulib/cpg_lock.c
++++ b/rgmanager/src/clulib/cpg_lock.c
+@@ -19,6 +19,7 @@
+ /* Default lockspace stuff */
+ static cpg_lock_handle_t _cpgh = NULL;
+ static pthread_mutex_t _default_lock = PTHREAD_MUTEX_INITIALIZER;
++extern int shutdown_pending;
+ 
+ static void
+ dlm2cpg(struct dlm_lksb *dlm, struct cpg_lock *cpg)
+@@ -75,7 +76,13 @@ _cpg_lock(int mode,
+ 		cpg2dlm(&l, lksb);
+ 	} else {
+ 		if (errno == EPIPE) {
+-			raise(SIGSEGV);
++			// If cpglockd went away because cman told it to shutdown,
++			//   our shutdown request might be right behind it.  Avoid
++			//   crashing for a moment to see if we get the message
++			if (!shutdown_pending)
++				sleep(3);
++			if (!shutdown_pending)
++				raise(SIGSEGV);
+ 		}
+ 	}
+ 
+diff --git a/rgmanager/src/daemons/main.c b/rgmanager/src/daemons/main.c
+index 9d5aa9a..4831104 100644
+--- a/rgmanager/src/daemons/main.c
++++ b/rgmanager/src/daemons/main.c
+@@ -646,6 +646,7 @@ handle_cluster_event(msgctx_t *ctx)
+ 	case M_TRY_SHUTDOWN:
+ 		msg_receive(ctx, NULL, 0, 0);
+ 		logt_print(LOG_WARNING, "#67: Shutting down uncleanly\n");
++		flag_shutdown(15);
+ 		rg_set_inquorate();
+ 		rg_doall(RG_INIT, 1, "Emergency stop of %s");
+ 		rg_clear_initialized(0);
+-- 
+2.5.5
+

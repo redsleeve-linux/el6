@@ -1,0 +1,44 @@
+From f954a66efc2726f5eca6ca2c1f38294098fcbbd0 Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Fri, 22 Apr 2016 18:32:26 +0200
+Subject: [PATCH 68/68] LDAP: Try also the AD access control for IPA users
+
+Resolves:
+    https://fedorahosted.org/sssd/ticket/2927
+
+If a user from an AD trusted domain is logging in, we should also check
+their AD lockout status. This helps cases where the user might have been
+disabled but is logging in with an SSH public key.
+---
+ src/providers/ldap/sdap_access.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/providers/ldap/sdap_access.c b/src/providers/ldap/sdap_access.c
+index 3ef45b717787058ec61c4d6875cb41bb2e8195fc..14ec34508636c19b288a57cd305d874705bdb842 100644
+--- a/src/providers/ldap/sdap_access.c
++++ b/src/providers/ldap/sdap_access.c
+@@ -741,6 +741,21 @@ static errno_t sdap_account_expired(struct sdap_access_ctx *access_ctx,
+                 DEBUG(SSSDBG_CRIT_FAILURE,
+                       "sdap_account_expired_rhds failed.\n");
+             }
++
++            if (ret == EOK &&
++                    strcasecmp(expire, LDAP_ACCOUNT_EXPIRE_IPA) == 0) {
++                DEBUG(SSSDBG_TRACE_FUNC,
++                      "IPA access control succeeded, checking AD "
++                      "access control\n");
++                ret = sdap_account_expired_ad(pd, user_entry);
++                if (ret == ERR_ACCOUNT_EXPIRED || ret == ERR_ACCESS_DENIED) {
++                    DEBUG(SSSDBG_TRACE_FUNC,
++                        "sdap_account_expired_ad: %s.\n", sss_strerror(ret));
++                } else if (ret != EOK) {
++                    DEBUG(SSSDBG_CRIT_FAILURE,
++                          "sdap_account_expired_ad failed.\n");
++                }
++            }
+         } else if (strcasecmp(expire, LDAP_ACCOUNT_EXPIRE_NDS) == 0) {
+             ret = sdap_account_expired_nds(pd, user_entry);
+             if (ret == ERR_ACCESS_DENIED) {
+-- 
+2.4.11
+

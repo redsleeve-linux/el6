@@ -1,0 +1,109 @@
+From f4e0a89d2fa76b0a24dec607e3418bdd100ae64a Mon Sep 17 00:00:00 2001
+From: Alexander Bokovoy <abokovoy@redhat.com>
+Date: Mon, 12 Jan 2015 13:36:36 +0200
+Subject: [PATCH] Support Samba PASSDB 0.2.0 aka interface version 24
+
+1. Samba project renamed libpdb to libsamba-passdb
+   https://bugzilla.samba.org/show_bug.cgi?id=10355
+
+2. With interface version 24, Samba removed uid_to_sid()/gid_to_sid()
+   from the PASSDB interface and united them as id_to_sid().
+
+Make sure FreeIPA ipa_sam code supports new and old versions of
+the PASSDB API.
+
+https://fedorahosted.org/freeipa/ticket/4778
+
+Reviewed-By: Sumit Bose <sbose@redhat.com>
+---
+ daemons/configure.ac        | 17 +++++++++++++++++
+ daemons/ipa-sam/Makefile.am |  3 ++-
+ daemons/ipa-sam/ipa_sam.c   | 21 +++++++++++++++++++++
+ 3 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/daemons/configure.ac b/daemons/configure.ac
+index ebf625ebffd8a92e0a3b050955b9376e002ed6c9..1cf3a0937e0de2fea6ac6a0a031425e3613595ec 100644
+--- a/daemons/configure.ac
++++ b/daemons/configure.ac
+@@ -252,6 +252,23 @@ AC_CHECK_LIB([wbclient],
+              [$SAMBA40EXTRA_LIBPATH])
+ AC_SUBST(WBCLIENT_LIBS)
+ 
++LIBPDB_NAME=""
++AC_CHECK_LIB([samba-passdb],
++             [make_pdb_method],
++             [LIBPDB_NAME="samba-passdb"; HAVE_LIBPDB=1],
++             [LIBPDB_NAME="pdb"],
++             [$SAMBA40EXTRA_LIBPATH])
++
++if test "x$LIB_PDB_NAME" = "xpdb" ; then
++  AC_CHECK_LIB([$LIBPDB_NAME],
++               [make_pdb_method],
++               [HAVE_LIBPDB=1],
++               [AC_MSG_ERROR([Neither libpdb nor libsamba-passdb does have make_pdb_method])],
++               [$SAMBA40EXTRA_LIBPATH])
++fi
++
++AC_SUBST(LIBPDB_NAME)
++
+ dnl ---------------------------------------------------------------------------
+ dnl - Check for check unit test framework http://check.sourceforge.net/
+ dnl ---------------------------------------------------------------------------
+diff --git a/daemons/ipa-sam/Makefile.am b/daemons/ipa-sam/Makefile.am
+index 53c8f47bbfe927caf785a5529fb5d6e2dcbc7525..ecf16d86078f5d2006405f4deb8a984a3adbf290 100644
+--- a/daemons/ipa-sam/Makefile.am
++++ b/daemons/ipa-sam/Makefile.am
+@@ -1,7 +1,8 @@
+ NULL =
++LIBPDB_NAME = @LIBPDB_NAME@
+ SAMBA40EXTRA_LIBS = $(SAMBA40EXTRA_LIBPATH)	\
+ 			-lsmbldap		\
+-			-lpdb			\
++			-l$(LIBPDB_NAME)			\
+ 			-lsmbconf		\
+ 			$(NULL)
+ 
+diff --git a/daemons/ipa-sam/ipa_sam.c b/daemons/ipa-sam/ipa_sam.c
+index 3fe5a73813543754d50c18f0e9c8b6ea866ebf1a..a095cf66fe24619b1eaef8ec1be999734b2418b0 100644
+--- a/daemons/ipa-sam/ipa_sam.c
++++ b/daemons/ipa-sam/ipa_sam.c
+@@ -942,6 +942,22 @@ done:
+ 	return ret;
+ }
+ 
++#if PASSDB_INTERFACE_VERSION >= 24
++/* Since version 24, uid_to_sid() and gid_to_sid() were removed in favor of id_to_sid() */
++static bool ipasam_id_to_sid(struct pdb_methods *methods, struct unixid *id, struct dom_sid *sid)
++{
++	bool result = false;
++
++	if (id->type != ID_TYPE_GID) {
++		result = ldapsam_uid_to_sid(methods, id->id, sid);
++	}
++	if (!result && id->type != ID_TYPE_UID) {
++		result = ldapsam_gid_to_sid(methods, id->id, sid);
++	}
++
++	return result;
++}
++#endif
+ 
+ static char *get_ldap_filter(TALLOC_CTX *mem_ctx, const char *username)
+ {
+@@ -4265,8 +4281,13 @@ static NTSTATUS pdb_init_ipasam(struct pdb_methods **pdb_method,
+ 	(*pdb_method)->search_aliases = ldapsam_search_aliases;
+ 	(*pdb_method)->lookup_rids = ldapsam_lookup_rids;
+ 	(*pdb_method)->sid_to_id = ldapsam_sid_to_id;
++#if PASSDB_INTERFACE_VERSION >= 24
++/* Since version 24, uid_to_sid() and gid_to_sid() were removed in favor of id_to_sid() */
++	(*pdb_method)->id_to_sid = ipasam_id_to_sid;
++#else
+ 	(*pdb_method)->uid_to_sid = ldapsam_uid_to_sid;
+ 	(*pdb_method)->gid_to_sid = ldapsam_gid_to_sid;
++#endif
+ 
+ 	(*pdb_method)->capabilities = pdb_ipasam_capabilities;
+ 	(*pdb_method)->get_domain_info = pdb_ipasam_get_domain_info;
+-- 
+2.9.3
+

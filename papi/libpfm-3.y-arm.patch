@@ -1,0 +1,198 @@
+diff -Naur ./config.mk.org ./config.mk
+--- ./config.mk.org	2010-09-17 15:47:42.000000000 +0000
++++ ./config.mk	2016-10-29 22:56:05.378504549 +0000
+@@ -48,6 +48,9 @@
+ ifeq (sparc64,$(findstring sparc64,$(ARCH)))
+ override ARCH=sparc
+ endif
++ifeq (arm,$(findstring arm,$(ARCH)))
++override ARCH=arm
++endif
+ 
+ #
+ # CONFIG_PFMLIB_SHARED: y=compile static and shared versions, n=static only
+@@ -105,6 +108,10 @@
+ CONFIG_PFMLIB_ARCH_I386=y
+ endif
+ 
++ifeq ($(ARCH),arm)
++CONFIG_PFMLIB_ARCH_ARM=y
++endif
++
+ ifeq ($(ARCH),mips64)
+ CONFIG_PFMLIB_ARCH_MIPS64=y
+ #
+diff -Naur ./include/Makefile.org ./include/Makefile
+--- ./include/Makefile.org	2009-11-03 21:25:26.000000000 +0000
++++ ./include/Makefile	2016-10-29 22:56:05.380504655 +0000
+@@ -98,6 +98,13 @@
+ 	   perfmon/pfmlib_sparc.h
+ endif
+ 
++ifeq ($(CONFIG_PFMLIB_ARCH_ARM),y)
++HEADERS += perfmon/pfmlib_os_arm.h   \
++	   perfmon/pfmlib_comp_arm.h \
++	   perfmon/perfmon_arm.h     \
++	   perfmon/pfmlib_arm.h
++endif
++
+ ifeq ($(CONFIG_PFMLIB_ARCH_MIPS64),y)
+ HEADERS += perfmon/pfmlib_os_mips64.h   \
+ 	   perfmon/pfmlib_comp_mips64.h \
+diff -Naur ./include/perfmon/perfmon_arm.h.org ./include/perfmon/perfmon_arm.h
+--- ./include/perfmon/perfmon_arm.h.org	1970-01-01 00:00:00.000000000 +0000
++++ ./include/perfmon/perfmon_arm.h	2016-10-29 22:56:05.382504760 +0000
+@@ -0,0 +1,8 @@
++
++#ifndef _PERFMON_ARM_H_
++#define _PERFMON_ARM_H_
++
++#define PFM_ARCH_MAX_PMCS	(256+64) /* 256 HW SW 64 */
++#define PFM_ARCH_MAX_PMDS	(256+64) /* 256 HW SW 64 */
++
++#endif /* _PERFMON_ARM_H_ */
+diff -Naur ./include/perfmon/perfmon.h.org ./include/perfmon/perfmon.h
+--- ./include/perfmon/perfmon.h.org	2009-01-16 19:31:29.000000000 +0000
++++ ./include/perfmon/perfmon.h	2016-10-29 22:56:05.386504972 +0000
+@@ -29,6 +29,10 @@
+ #include <perfmon/perfmon_i386.h>
+ #endif
+ 
++#ifdef __arm__
++#include <perfmon/perfmon_arm.h>
++#endif
++
+ #if defined(__powerpc__) || defined(__cell__)
+ #include <perfmon/perfmon_powerpc.h>
+ #endif
+diff -Naur ./include/perfmon/pfmlib_arm.h.org ./include/perfmon/pfmlib_arm.h
+--- ./include/perfmon/pfmlib_arm.h.org	1970-01-01 00:00:00.000000000 +0000
++++ ./include/perfmon/pfmlib_arm.h	2016-10-29 22:56:05.388505077 +0000
+@@ -0,0 +1,4 @@
++/*
++
++*/
++
+diff -Naur ./include/perfmon/pfmlib_comp_arm.h.org ./include/perfmon/pfmlib_comp_arm.h
+--- ./include/perfmon/pfmlib_comp_arm.h.org	1970-01-01 00:00:00.000000000 +0000
++++ ./include/perfmon/pfmlib_comp_arm.h	2016-10-29 22:56:05.390505183 +0000
+@@ -0,0 +1,35 @@
++/*
++ * ARM compiler specific macros
++ *
++ */
++#ifndef __PFMLIB_COMP_ARM_H__
++#define __PFMLIB_COMP_ARM_H__
++
++#ifndef __PFMLIB_COMP_H__
++#error "you should never include this file directly, use pfmlib_comp.h"
++#endif
++
++#ifndef __arm__
++#error "you should not be including this file"
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++static inline unsigned long
++pfmlib_popcnt(unsigned long v)
++{
++	unsigned long sum = 0;
++
++	for(; v ; v >>=1) {
++		if (v & 0x1) sum++;
++	}
++	return sum;
++}
++
++#ifdef __cplusplus /* extern C */
++}
++#endif
++
++#endif /* __PFMLIB_COMP_ARM_H__ */
+diff -Naur ./include/perfmon/pfmlib_comp.h.org ./include/perfmon/pfmlib_comp.h
+--- ./include/perfmon/pfmlib_comp.h.org	2008-01-10 19:26:11.000000000 +0000
++++ ./include/perfmon/pfmlib_comp.h	2016-10-29 23:13:12.660591089 +0000
+@@ -54,4 +54,8 @@
+ #include <perfmon/pfmlib_comp_crayx2.h>
+ #endif
+ 
++#ifdef __arm__
++#include <perfmon/pfmlib_comp_arm.h>
++#endif
++
+ #endif /* __PFMLIB_COMP_H__ */
+diff -Naur ./include/perfmon/pfmlib_os_arm.h.org ./include/perfmon/pfmlib_os_arm.h
+--- ./include/perfmon/pfmlib_os_arm.h.org	1970-01-01 00:00:00.000000000 +0000
++++ ./include/perfmon/pfmlib_os_arm.h	2016-10-29 22:56:05.395505447 +0000
+@@ -0,0 +1,27 @@
++/*
++ */
++#ifndef __PFMLIB_OS_ARM_H__
++#define __PFMLIB_OS_ARM_H__
++
++#ifndef __PFMLIB_OS_H__
++#error "you should never include this file directly, use pfmlib_os.h"
++#endif
++
++#include <perfmon/pfmlib_comp.h>
++
++#ifndef __arm__
++#error "you should not be including this file"
++#endif
++
++#ifndef __PFMLIB_OS_COMPILE
++#include <perfmon/perfmon.h>
++/*
++ * macros version of pfm_self_start/pfm_self_stop to be used in per-process self-monitoring sessions.
++ * they are also defined as real functions.
++ *
++ * DO NOT USE on system-wide sessions.
++ */
++#endif /* __PFMLIB_OS_COMPILE */
++
++
++#endif /* __PFMLIB_OS_ARM_H__ */
+diff -Naur ./include/perfmon/pfmlib_os.h.org ./include/perfmon/pfmlib_os.h
+--- ./include/perfmon/pfmlib_os.h.org	2008-04-16 15:10:36.000000000 +0000
++++ ./include/perfmon/pfmlib_os.h	2016-10-29 23:13:44.201249395 +0000
+@@ -54,5 +54,10 @@
+ #ifdef __crayx2
+ #include <perfmon/pfmlib_os_crayx2.h>
+ #endif
++
++#ifdef __arm__
++#include <perfmon/pfmlib_os_arm.h>
++#endif
++
+ #endif /* __linux__ */
+ #endif /* __PFMLIB_OS_H__ */
+diff -Naur ./lib/Makefile.org ./lib/Makefile
+--- ./lib/Makefile.org	2009-08-24 11:46:48.000000000 +0000
++++ ./lib/Makefile	2016-10-29 22:56:05.400505711 +0000
+@@ -60,6 +60,12 @@
+ CFLAGS += -DCONFIG_PFMLIB_ARCH_I386
+ endif
+ 
++ifeq ($(CONFIG_PFMLIB_ARCH_ARM),y)
++INCARCH = $(INC_ARM)
++CFLAGS += -DCONFIG_PFMLIB_ARCH_ARM
++endif
++
++
+ ifeq ($(CONFIG_PFMLIB_ARCH_X86_64),y)
+ INCARCH = $(INC_X86_64)
+ SRCS   += pfmlib_pentium4.c pfmlib_amd64.c pfmlib_core.c pfmlib_gen_ia32.c pfmlib_intel_atom.c \
+@@ -195,6 +201,10 @@
+   ultra12_events.h ultra3_events.h ultra3plus_events.h ultra3i_events.h \
+   ultra4plus_events.h niagara1_events.h niagara2_events.h
+ 
++INC_ARM= $(PFMINCDIR)/perfmon/pfmlib_arm.h \
++  $(PFMINCDIR)/perfmon/pfmlib_comp_arm.h \
++  $(PFMINCDIR)/perfmon/pfmlib_os_arm.h
++
+ INC_CRAYX2= $(PFMINCDIR)/perfmon/pfmlib_crayx2.h \
+   crayx2_events.h pfmlib_crayx2_priv.h
+ 

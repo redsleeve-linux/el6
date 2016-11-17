@@ -1,0 +1,47 @@
+From: Chuck Short <zulcss gmail com>
+To: libvir-list redhat com
+Subject: [libvirt] [PATCH] ARMHF: Fixed Parser for /proc/cpuinfo needs to be adapted for your architecture
+Date: Thu, 26 Jul 2012 08:32:07 -0500
+  
+  Minimal CPU "parser" for armhf to avoid compile time warning.
+
+Signed-off-by: Chuck Short <chuck short canonical com>
+---
+ src/nodeinfo.c |   21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/src/nodeinfo.c b/src/nodeinfo.c
+index 84a5d66..358fa3b 100644
+--- a/src/nodeinfo.c
++++ b/src/nodeinfo.c
+@@ -397,6 +397,27 @@ int linuxNodeInfoCPUPopulate(FILE *cpuinfo,
+              * and parsed in next iteration, because it is not in expected
+              * format and thus lead to error. */
+         }
++# elif defined(__arm__)
++         char *buf = line;
++         if (STRPREFIX(buf, "BogoMIPS")) {
++             char *p;
++             unsigned int ui;
++
++             buf += 8;
++             while (*buf && c_isspace(*buf))
++                 buf++;
++
++             if (*buf != ':' || !buf[1]) {
++		virReportError(VIR_ERR_INTERNAL_ERROR,
++				"%s", _("parsing cpu MHz from cpuinfo"));
++		goto cleanup;
++	     }
++
++	    if (virStrToLong_ui(buf+1, &p, 10, &ui) == 0
++		/* Accept trailing fractional part.  */
++		&& (*p == '\0' || *p == '.' || c_isspace(*p)))
++		nodeinfo->mhz = ui;
++         }
+ # elif defined(__s390__) || \
+       defined(__s390x__)
+         /* s390x has no realistic value for CPU speed,
+--
+1.7.10.4
+

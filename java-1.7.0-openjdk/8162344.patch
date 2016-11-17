@@ -1,0 +1,94 @@
+# HG changeset patch
+# User andrew
+# Date 1469192287 -3600
+#      Fri Jul 22 13:58:07 2016 +0100
+# Node ID cc1ed9a351886645eb729144696e41d187564ec2
+# Parent  b015efd2ab82fea24e06b539036c2e4978e26266
+8162344: The API changes made by CR 7064075 need to be reverted
+Summary: Remove type parameters added to SecretKeyFactory.getKeySpec and SecretKeyFactorySpi.engineGetKeySpec
+Reviewed-by: omajid
+
+diff --git a/src/share/classes/com/sun/crypto/provider/DESKeyFactory.java b/src/share/classes/com/sun/crypto/provider/DESKeyFactory.java
+--- openjdk/jdk/src/share/classes/com/sun/crypto/provider/DESKeyFactory.java
++++ openjdk/jdk/src/share/classes/com/sun/crypto/provider/DESKeyFactory.java
+@@ -92,7 +92,7 @@
+      * inappropriate for the given key, or the given key cannot be processed
+      * (e.g., the given key has an unrecognized algorithm or format).
+      */
+-    protected KeySpec engineGetKeySpec(SecretKey key, Class<?> keySpec)
++    protected KeySpec engineGetKeySpec(SecretKey key, Class keySpec)
+         throws InvalidKeySpecException {
+ 
+         try {
+diff --git a/src/share/classes/com/sun/crypto/provider/DESedeKeyFactory.java b/src/share/classes/com/sun/crypto/provider/DESedeKeyFactory.java
+--- openjdk/jdk/src/share/classes/com/sun/crypto/provider/DESedeKeyFactory.java
++++ openjdk/jdk/src/share/classes/com/sun/crypto/provider/DESedeKeyFactory.java
+@@ -92,7 +92,7 @@
+      * inappropriate for the given key, or the given key cannot be processed
+      * (e.g., the given key has an unrecognized algorithm or format).
+      */
+-    protected KeySpec engineGetKeySpec(SecretKey key, Class<?> keySpec)
++    protected KeySpec engineGetKeySpec(SecretKey key, Class keySpec)
+         throws InvalidKeySpecException {
+ 
+         try {
+diff --git a/src/share/classes/com/sun/crypto/provider/PBEKeyFactory.java b/src/share/classes/com/sun/crypto/provider/PBEKeyFactory.java
+--- openjdk/jdk/src/share/classes/com/sun/crypto/provider/PBEKeyFactory.java
++++ openjdk/jdk/src/share/classes/com/sun/crypto/provider/PBEKeyFactory.java
+@@ -131,7 +131,7 @@
+      * inappropriate for the given key, or the given key cannot be processed
+      * (e.g., the given key has an unrecognized algorithm or format).
+      */
+-    protected KeySpec engineGetKeySpec(SecretKey key, Class<?> keySpecCl)
++    protected KeySpec engineGetKeySpec(SecretKey key, Class keySpecCl)
+         throws InvalidKeySpecException {
+         if ((key instanceof SecretKey)
+             && (validTypes.contains(key.getAlgorithm().toUpperCase()))
+diff --git a/src/share/classes/com/sun/crypto/provider/PBKDF2HmacSHA1Factory.java b/src/share/classes/com/sun/crypto/provider/PBKDF2HmacSHA1Factory.java
+--- openjdk/jdk/src/share/classes/com/sun/crypto/provider/PBKDF2HmacSHA1Factory.java
++++ openjdk/jdk/src/share/classes/com/sun/crypto/provider/PBKDF2HmacSHA1Factory.java
+@@ -86,7 +86,7 @@
+      * given key cannot be processed (e.g., the given key has an
+      * unrecognized algorithm or format).
+      */
+-    protected KeySpec engineGetKeySpec(SecretKey key, Class<?> keySpecCl)
++    protected KeySpec engineGetKeySpec(SecretKey key, Class keySpecCl)
+         throws InvalidKeySpecException {
+         if (key instanceof javax.crypto.interfaces.PBEKey) {
+             // Check if requested key spec is amongst the valid ones
+diff --git a/src/share/classes/javax/crypto/SecretKeyFactory.java b/src/share/classes/javax/crypto/SecretKeyFactory.java
+--- openjdk/jdk/src/share/classes/javax/crypto/SecretKeyFactory.java
++++ openjdk/jdk/src/share/classes/javax/crypto/SecretKeyFactory.java
+@@ -368,7 +368,7 @@
+      * (e.g., the given key has an algorithm or format not supported by this
+      * secret-key factory).
+      */
+-    public final KeySpec getKeySpec(SecretKey key, Class<?> keySpec)
++    public final KeySpec getKeySpec(SecretKey key, Class keySpec)
+             throws InvalidKeySpecException {
+         if (serviceIterator == null) {
+             return spi.engineGetKeySpec(key, keySpec);
+diff --git a/src/share/classes/javax/crypto/SecretKeyFactorySpi.java b/src/share/classes/javax/crypto/SecretKeyFactorySpi.java
+--- openjdk/jdk/src/share/classes/javax/crypto/SecretKeyFactorySpi.java
++++ openjdk/jdk/src/share/classes/javax/crypto/SecretKeyFactorySpi.java
+@@ -88,7 +88,7 @@
+      * (e.g., the given key has an algorithm or format not supported by this
+      * secret-key factory).
+      */
+-    protected abstract KeySpec engineGetKeySpec(SecretKey key, Class<?> keySpec)
++    protected abstract KeySpec engineGetKeySpec(SecretKey key, Class keySpec)
+         throws InvalidKeySpecException;
+ 
+     /**
+diff --git a/src/share/classes/sun/security/pkcs11/P11SecretKeyFactory.java b/src/share/classes/sun/security/pkcs11/P11SecretKeyFactory.java
+--- openjdk/jdk/src/share/classes/sun/security/pkcs11/P11SecretKeyFactory.java
++++ openjdk/jdk/src/share/classes/sun/security/pkcs11/P11SecretKeyFactory.java
+@@ -319,7 +319,7 @@
+     }
+ 
+     // see JCE spec
+-    protected KeySpec engineGetKeySpec(SecretKey key, Class<?> keySpec)
++    protected KeySpec engineGetKeySpec(SecretKey key, Class keySpec)
+             throws InvalidKeySpecException {
+         token.ensureValid();
+         if ((key == null) || (keySpec == null)) {

@@ -1,0 +1,20 @@
+--- src/util/viratomic.h.org	2016-11-11 23:13:35.643965176 +0000
++++ src/util/viratomic.h	2016-11-11 23:15:15.576116262 +0000
+@@ -322,7 +322,7 @@
+     pthread_mutex_unlock(&virAtomicLock);
+ }
+ 
+-static inline int
++static inline __attribute__((__always_inline__)) int
+ virAtomicIntInc(volatile int *atomic)
+ {
+     int value;
+@@ -334,7 +334,7 @@
+     return value;
+ }
+ 
+-static inline bool
++static inline __attribute__((__always_inline__)) bool
+ virAtomicIntDecAndTest(volatile int *atomic)
+ {
+     bool is_zero;

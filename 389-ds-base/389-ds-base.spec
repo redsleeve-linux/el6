@@ -22,7 +22,7 @@
 Summary:          389 Directory Server (base)
 Name:             389-ds-base
 Version:          1.2.11.15
-Release:          %{?relprefix}74%{?prerel}%{?dist}.1
+Release:          %{?relprefix}75%{?prerel}%{?dist}
 License:          GPLv2 with exceptions
 URL:              http://port389.org/
 Group:            System Environment/Daemons
@@ -31,7 +31,7 @@ Requires:         %{name}-libs = %{version}-%{release}
 # for migration tools
 Provides:         ldif2ldbm
 
-ExclusiveArch:    x86_64 %{ix86} %{arm}
+ExclusiveArch:    x86_64 %{ix86}
 BuildRequires:    nspr-devel
 BuildRequires:    nss-devel
 BuildRequires:    svrcore-devel
@@ -479,6 +479,9 @@ Patch376:         0376-Ticket-47964-1.2.11-Incorrect-search-result-after-re.patc
 Patch377:         0377-Ticket-47788-Only-check-postop-result-if-its-a-repli.patch
 Patch378:         0378-Ticket-48445-keep-alive-entries-can-break-replicatio.patch
 Patch379:         0379-Ticket-48420-change-severity-of-some-messages-relate.patch
+Patch380:         0380-Ticket-48808-Paged-results-search-returns-the-blank-.patch
+Patch381:         0381-Ticket-48813-password-history-is-not-updated-when-an.patch
+Patch382:         0382-Ticket-48854-Running-db2index-with-no-options-breaks.patch
 
 %description
 389 Directory Server is an LDAPv3 compliant server.  The base package includes
@@ -905,6 +908,9 @@ cp %{SOURCE1} README.devel
 %patch377 -p1
 %patch378 -p1
 %patch379 -p1
+%patch380 -p1
+%patch381 -p1
+%patch382 -p1
 
 %build
 %if %{use_openldap}
@@ -1042,8 +1048,11 @@ fi
 %{_libdir}/%{pkgname}/libslapd.so.*
 
 %changelog
-* Mon Aug 29 2016 Jacco Ligthart <jacco@redsleeve.org> - 1.2.11.15-74.1
-- Add ARM architectures
+* Fri Jun  3 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-75
+- Release 1.2.11.15-75
+- Resolves: #1335108 - Paged results search returns the blank list of entries (DS 48808)
+- Resolves: #1342614 - password history is not updated when an admin resets the password (DS 48813)
+- Resolves: #1342382 - Running db2index with no options breaks replication (DS 48854)
 
 * Thu Mar  3 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-74
 - Release 1.2.11.15-74

@@ -1,0 +1,14 @@
+diff -ruN numad-0.5git-orig/numad.c numad-0.5git/numad.c
+--- numad-0.5git-orig/numad.c	2015-08-28 08:58:15.177258026 +0200
++++ numad-0.5git/numad.c	2015-08-28 09:11:39.175305266 +0200
+@@ -85,6 +85,10 @@
+ #define DEFAULT_UTILIZATION_PERCENT 85
+ #define DEFAULT_MEMLOCALITY_PERCENT 90
+ 
++#if defined (__arm__)
++#define __NR_migrate_pages 379
++#endif
++
+ 
+ #define CONVERT_DIGITS_TO_NUM(p, n) \
+     n = *p++ - '0'; \

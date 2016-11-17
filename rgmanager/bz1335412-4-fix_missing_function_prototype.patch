@@ -1,0 +1,31 @@
+From 80b9ae57170c1c6042375ea5119aea1ec79e3ab4 Mon Sep 17 00:00:00 2001
+From: Ryan McCabe <rmccabe@redhat.com>
+Date: Thu, 9 Jun 2016 11:29:24 -0400
+Subject: [PATCH] rgmanager: Fix missing function prototype
+
+Add a function prototype for lock_commit_cb so that we can properly
+re-init the vf lock callbacks if we have lost and regained quorum.
+
+Resolves: rhbz#1084053
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ rgmanager/src/daemons/main.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/rgmanager/src/daemons/main.c b/rgmanager/src/daemons/main.c
+index 4831104..edd3d40 100644
+--- a/rgmanager/src/daemons/main.c
++++ b/rgmanager/src/daemons/main.c
+@@ -31,6 +31,9 @@
+ void dump_thread_states(FILE *);
+ #endif
+ static int configure_rgmanager(int ccsfd, int debug, int *cluster_timeout);
++static int lock_commit_cb(char __attribute__ ((unused)) *key,
++	uint64_t __attribute__ ((unused)) viewno,
++	void *data, uint32_t datalen);
+ 
+ void flag_shutdown(int sig);
+ 
+-- 
+2.5.5
+

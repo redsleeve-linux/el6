@@ -1,0 +1,142 @@
+From 7052347321b3c0bb43c82bb43a497520d51bba56 Mon Sep 17 00:00:00 2001
+From: "Endi S. Dewata" <edewata@redhat.com>
+Date: Tue, 16 Sep 2014 20:11:35 -0400
+Subject: [PATCH] Modififed NSSConnection not to shutdown existing database.
+
+The NSSConnection class has been modified not to shutdown the
+existing NSS database if the database is already opened to
+establish an SSL connection, or is already opened by another
+code that uses an NSS database without establishing an SSL
+connection such as vault CLIs.
+
+https://fedorahosted.org/freeipa/ticket/4638
+
+Reviewed-By: Jan Cholasta <jcholast@redhat.com>
+---
+ ipalib/rpc.py       | 34 +++++++++++++++++++---------------
+ ipapython/nsslib.py | 35 +++++++++++++++++++++++------------
+ 2 files changed, 42 insertions(+), 27 deletions(-)
+
+diff --git a/ipalib/rpc.py b/ipalib/rpc.py
+index c9f9e7aa28c31f5a23f596036f526e6195150835..94593ce51f0f735c280286a0dcf947f62e55b9b8 100644
+--- a/ipalib/rpc.py
++++ b/ipalib/rpc.py
+@@ -57,6 +57,7 @@ from ipalib.text import _
+ 
+ import httplib
+ import socket
++import ipapython.nsslib
+ from ipapython.nsslib import NSSHTTPS, NSSConnection
+ from nss.error import NSPRError
+ from urllib2 import urlparse
+@@ -292,35 +293,38 @@ class LanguageAwareTransport(Transport):
+ class SSLTransport(LanguageAwareTransport):
+     """Handles an HTTPS transaction to an XML-RPC server."""
+ 
+-    def __nss_initialized(self, dbdir):
++    def get_connection_dbdir(self):
+         """
+-        If there is another connections open it may have already
+-        initialized NSS. This is likely to lead to an NSS shutdown
+-        failure.  One way to mitigate this is to tell NSS to not
+-        initialize if it has already been done in another open connection.
+-
+-        Returns True if another connection is using the same db.
++        If there is a connections open it may have already initialized
++        NSS database. Return the database location used by the connection.
+         """
+         for value in context.__dict__.values():
+             if not isinstance(value, Connection):
+                 continue
+             if not isinstance(value.conn._ServerProxy__transport, SSLTransport):
+                 continue
+-            if hasattr(value.conn._ServerProxy__transport, 'dbdir') and \
+-              value.conn._ServerProxy__transport.dbdir == dbdir:
+-                return True
+-        return False
++            if hasattr(value.conn._ServerProxy__transport, 'dbdir'):
++                return value.conn._ServerProxy__transport.dbdir
++        return None
+ 
+     def make_connection(self, host):
+         host, self._extra_headers, x509 = self.get_host_info(host)
+         # Python 2.7 changed the internal class used in xmlrpclib from
+         # HTTP to HTTPConnection. We need to use the proper subclass
+ 
+-        # If we an existing connection exists using the same NSS database
+-        # there is no need to re-initialize. Pass thsi into the NSS
+-        # connection creator.
+         dbdir = '/etc/pki/nssdb'
+-        no_init = self.__nss_initialized(dbdir)
++        connection_dbdir = self.get_connection_dbdir()
++
++        if connection_dbdir:
++            # If an existing connection is already using the same NSS
++            # database there is no need to re-initialize.
++            no_init = dbdir == connection_dbdir
++
++        else:
++            # If the NSS database is already being used there is no
++            # need to re-initialize.
++            no_init = dbdir == ipapython.nsslib.current_dbdir
++
+         (major, minor, micro, releaselevel, serial) = sys.version_info
+         if major == 2 and minor < 7:
+             conn = NSSHTTPS(host, 443, dbdir=dbdir, no_init=no_init,
+diff --git a/ipapython/nsslib.py b/ipapython/nsslib.py
+index 282cb2c636171932e648c6015b76324429a217fb..75bbd9b5de68b2907c06b06ad8bf1e62c4e7acf5 100644
+--- a/ipapython/nsslib.py
++++ b/ipapython/nsslib.py
+@@ -30,6 +30,9 @@ import nss.nss as nss
+ import nss.ssl as ssl
+ import nss.error as error
+ 
++# NSS database currently open
++current_dbdir = None
++
+ def auth_certificate_callback(sock, check_sig, is_server, certdb):
+     cert_is_valid = False
+ 
+@@ -184,19 +187,27 @@ class NSSConnection(httplib.HTTPConnection, NSSAddressFamilyFallback):
+         httplib.HTTPConnection.__init__(self, host, port, strict)
+         NSSAddressFamilyFallback.__init__(self, family)
+ 
+-        if not dbdir:
+-            raise RuntimeError("dbdir is required")
+-
+         root_logger.debug('%s init %s', self.__class__.__name__, host)
+-        if not no_init and nss.nss_is_initialized():
+-            # close any open NSS database and use the new one
+-            ssl.clear_session_cache()
+-            try:
+-                nss.nss_shutdown()
+-            except NSPRError, e:
+-                if e.errno != error.SEC_ERROR_NOT_INITIALIZED:
+-                    raise e
+-        nss.nss_init(dbdir)
++
++        # If initialization is requested, initialize the new database.
++        if not no_init:
++
++            if nss.nss_is_initialized():
++                ssl.clear_session_cache()
++                try:
++                    nss.nss_shutdown()
++                except NSPRError, e:
++                    if e.errno != error.SEC_ERROR_NOT_INITIALIZED:
++                        raise e
++
++            if not dbdir:
++                raise RuntimeError("dbdir is required")
++
++            nss.nss_init(dbdir)
++
++            global current_dbdir
++            current_dbdir = dbdir
++
+         ssl.set_domestic_policy()
+         nss.set_password_callback(self.password_callback)
+         self.tls_version_min = str(tls_version_min)
+-- 
+2.7.4
+

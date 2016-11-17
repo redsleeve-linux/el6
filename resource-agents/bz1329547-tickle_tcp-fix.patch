@@ -1,0 +1,23 @@
+From 1e3c0b11d68b8713f20abe12d6997eb853def797 Mon Sep 17 00:00:00 2001
+From: Oyvind Albrigtsen <oalbrigt@redhat.com>
+Date: Tue, 19 Apr 2016 10:15:50 +0200
+Subject: [PATCH] tickle_tcp: Fix "Failed to open raw socket (Invalid
+ argument)" issue
+
+---
+ tools/tickle_tcp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/tickle_tcp.c b/tools/tickle_tcp.c
+index cf0bdcb..7c5a537 100644
+--- a/tools/tickle_tcp.c
++++ b/tools/tickle_tcp.c
+@@ -245,7 +245,7 @@ int send_tickle_ack(const sock_addr *dst,
+ 		ip4pkt.tcp.window   = htons(1234);
+ 		ip4pkt.tcp.check    = tcp_checksum((uint16_t *)&ip4pkt.tcp, sizeof(ip4pkt.tcp), &ip4pkt.ip);
+ 
+-		s = socket(AF_INET, SOCK_RAW, htons(IPPROTO_RAW));
++		s = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+ 		if (s == -1) {
+ 			fprintf(stderr, "Failed to open raw socket (%s)\n", strerror(errno));
+ 			return -1;

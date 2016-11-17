@@ -1,0 +1,12 @@
+--- gcc/config/arm/linux-elf.h.org	2016-09-13 00:11:25.854850030 +0000
++++ gcc/config/arm/linux-elf.h	2016-09-13 00:12:45.564649531 +0000
+@@ -36,7 +36,8 @@
+ 
+ #define SUBTARGET_CPU_DEFAULT TARGET_CPU_arm6
+ 
+-#define SUBTARGET_EXTRA_LINK_SPEC " -m armelf_linux -p"
++#define SUBTARGET_EXTRA_LINK_SPEC \
++	" %{mbig-endian:-m armelfb_linux_eabi} %{mlittle-endian:-marmelf_linux_eabi} "
+ 
+ #undef  MULTILIB_DEFAULTS
+ #define MULTILIB_DEFAULTS \

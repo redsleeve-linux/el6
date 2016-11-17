@@ -1,0 +1,68 @@
+commit ccfa2f37f4f2458cae7c6d1535d451c943680779
+Author: Pranjal Jumde <pjumde@apple.com>
+Date:   Tue Mar 1 11:34:04 2016 -0800
+
+    Bug 758605: Heap-based buffer overread in xmlDictAddString <https://bugzilla.gnome.org/show_bug.cgi?id=758605>
+    
+    Reviewed by David Kilzer.
+    
+    * HTMLparser.c:
+    (htmlParseName): Add bounds check.
+    (htmlParseNameComplex): Ditto.
+    * runtest.c:
+    (pushParseTest): The input for the new test case was so small
+    (4 bytes) that htmlParseChunk() was never called after
+    htmlCreatePushParserCtxt(), thereby creating a false positive
+    test failure.  Fixed by using a do-while loop so we always call
+    htmlParseChunk() at least once.
+    
+    Removed tests as they broke on RHEL-6, different output
+
+diff --git a/HTMLparser.c b/HTMLparser.c
+index eaacf23..405d21c 100644
+--- a/HTMLparser.c
++++ b/HTMLparser.c
+@@ -2378,6 +2378,10 @@ htmlParseName(htmlParserCtxtPtr ctxt) {
+ 	       (*in == '_') || (*in == '-') ||
+ 	       (*in == ':') || (*in == '.'))
+ 	    in++;
++
++	if (in == ctxt->input->end)
++	    return(NULL);
++
+ 	if ((*in > 0) && (*in < 0x80)) {
+ 	    count = in - ctxt->input->cur;
+ 	    ret = xmlDictLookup(ctxt->dict, ctxt->input->cur, count);
+@@ -2421,6 +2425,10 @@ htmlParseNameComplex(xmlParserCtxtPtr ctxt) {
+ 	NEXTL(l);
+ 	c = CUR_CHAR(l);
+     }
++
++    if (ctxt->input->base > ctxt->input->cur - len)
++	return(NULL);
++
+     return(xmlDictLookup(ctxt->dict, ctxt->input->cur - len, len));
+ }
+ 
+diff --git a/runtest.c b/runtest.c
+index 16196ea..0bac117 100644
+--- a/runtest.c
++++ b/runtest.c
+@@ -1828,7 +1828,7 @@ pushParseTest(const char *filename, const char *result,
+     ctxt = xmlCreatePushParserCtxt(NULL, NULL, base + cur, 4, filename);
+     xmlCtxtUseOptions(ctxt, options);
+     cur += 4;
+-    while (cur < size) {
++    do {
+         if (cur + 1024 >= size) {
+ #ifdef LIBXML_HTML_ENABLED
+ 	    if (options & XML_PARSE_HTML)
+@@ -1846,7 +1846,7 @@ pushParseTest(const char *filename, const char *result,
+ 	    xmlParseChunk(ctxt, base + cur, 1024, 0);
+ 	    cur += 1024;
+ 	}
+-    }
++    } while (cur < size);
+     doc = ctxt->myDoc;
+ #ifdef LIBXML_HTML_ENABLED
+     if (options & XML_PARSE_HTML)

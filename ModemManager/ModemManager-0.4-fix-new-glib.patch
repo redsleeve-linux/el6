@@ -1,0 +1,29 @@
+--- ModemManager-0.4/libqcdm/tests/test-qcdm.c.org	2016-09-18 19:59:50.166785939 +0000
++++ ModemManager-0.4/libqcdm/tests/test-qcdm.c	2016-09-18 20:00:44.036636528 +0000
+@@ -28,7 +28,11 @@
+     gpointer com_data;
+ } TestData;
+ 
++#if GLIB_CHECK_VERSION(2,25,12)
++typedef GTestFixtureFunc TCFunc;
++#else
+ typedef void (*TCFunc)(void);
++#endif
+ 
+ #define TESTCASE(t, d) g_test_create_case (#t, 0, d, NULL, (TCFunc) t, NULL)
+ 
+--- ModemManager-0.4/src/tests/test-modem-helpers.c.org	2016-09-18 20:02:14.336386163 +0000
++++ ModemManager-0.4/src/tests/test-modem-helpers.c	2016-09-18 20:03:02.366253039 +0000
+@@ -790,8 +790,11 @@
+     g_free (data);
+ }
+ 
+-
++#if GLIB_CHECK_VERSION(2,25,12)
++typedef GTestFixtureFunc TCFunc;
++#else
+ typedef void (*TCFunc)(void);
++#endif
+ 
+ #define TESTCASE(t, d) g_test_create_case (#t, 0, d, NULL, (TCFunc) t, NULL)
+ 

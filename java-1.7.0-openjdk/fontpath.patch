@@ -1,0 +1,11 @@
+diff --git a/src/solaris/native/sun/awt/fontpath.c b/src/solaris/native/sun/awt/fontpath.c
+--- openjdk/jdk/src/solaris/native/sun/awt/fontpath.c
++++ openjdk/jdk/src/solaris/native/sun/awt/fontpath.c
+@@ -1075,7 +1075,6 @@
+                 }
+             }
+         }
+-        (*env)->ReleaseStringUTFChars (env, fcNameStr, (const char*)fcName); 
+         FcFontSetDestroy (fontset);
+         FcPatternDestroy (pattern);
+ 	free(family);

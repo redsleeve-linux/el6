@@ -1,0 +1,37 @@
+From 3178e5d9e6ac7f6344ab476d76b18b3745b16a74 Mon Sep 17 00:00:00 2001
+From: Harald Hoyer <harald@redhat.com>
+Date: Fri, 29 Apr 2016 13:25:37 +0200
+Subject: [PATCH] iscsi: iscsistart -b does not like to be started in parallel
+
+running two instances of "iscistart -b" does not work apparently.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1322209
+---
+ modules.d/95iscsi/iscsiroot | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/modules.d/95iscsi/iscsiroot b/modules.d/95iscsi/iscsiroot
+index 51fd977..489a915 100755
+--- a/modules.d/95iscsi/iscsiroot
++++ b/modules.d/95iscsi/iscsiroot
+@@ -48,6 +48,12 @@ if getarg iscsi_firmware && ! [ -f /tmp/iscsistarted-firmware-ok ]; then
+     # start it in the background and wait for it in initqueue-finished
+     (
+         echo "[ -f \"/tmp/iscsistarted-iscsi-$$\" ]" > /initqueue-finished/iscsistarted-iscsi-$$.sh
++        # serialize iscsistart -b jobs
++        while [ -f /tmp/iscsistart-inprogress ]; do
++                sleep 0.2
++        done
++        echo "starting $$" > "/tmp/iscsistart-inprogress"
++
+         iscsistart -N
+         if iscsistart -b $iscsi_param </dev/null >>/tmp/iscsiroot.out 2>&1; then
+             echo 'started' > "/tmp/iscsistarted-firmware-ok"
+@@ -55,6 +61,7 @@ if getarg iscsi_firmware && ! [ -f /tmp/iscsistarted-firmware-ok ]; then
+         echo 'started' > "/tmp/iscsistarted-firmware"
+         echo 'started' > "/tmp/iscsistarted-iscsi-$$"
+         echo 'started' > "/tmp/iscsistarted-iscsi"
++        rm -f /tmp/iscsistart-inprogress
+     ) &
+ 
+     exit 0

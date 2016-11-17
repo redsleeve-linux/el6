@@ -1,0 +1,108 @@
+From e908405d3df35f4b88f3ee649c442a73ec62e8d6 Mon Sep 17 00:00:00 2001
+From: Adam Jackson <ajax@redhat.com>
+Date: Mon, 23 May 2016 14:09:58 -0400
+Subject: [PATCH] dix: Enable indirect GLX by default, add xorg.conf option
+
+MUSTARD: Add iglxFrom at the end of xf86InfoRec just in case.
+
+Signed-off-by: Adam Jackson <ajax@redhat.com>
+---
+ hw/xfree86/common/xf86Config.c  | 9 +++++++++
+ hw/xfree86/common/xf86Init.c    | 4 ++++
+ hw/xfree86/common/xf86Privstr.h | 1 +
+ hw/xfree86/man/xorg.conf.man    | 4 ++++
+ os/utils.c                      | 2 +-
+ 5 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/hw/xfree86/common/xf86Config.c b/hw/xfree86/common/xf86Config.c
+index 5f7d13b..2f829e3 100644
+--- a/hw/xfree86/common/xf86Config.c
++++ b/hw/xfree86/common/xf86Config.c
+@@ -698,6 +698,7 @@ typedef enum {
+     FLAG_USE_SIGIO,
+     FLAG_AUTO_ADD_GPU,
+     FLAG_MAX_CLIENTS,
++    FLAG_IGLX,
+ } FlagValues;
+ 
+ /**
+@@ -759,6 +760,8 @@ static OptionInfoRec FlagOptions[] = {
+      {0}, FALSE},
+     {FLAG_MAX_CLIENTS, "MaxClients", OPTV_INTEGER,
+      {0}, FALSE },
++    {FLAG_IGLX, "IndirectGLX", OPTV_BOOLEAN,
++     {0}, FALSE},
+     {-1, NULL, OPTV_NONE,
+      {0}, FALSE},
+ };
+@@ -941,6 +944,12 @@ configServerFlags(XF86ConfFlagsPtr flagsconf, XF86OptionPtr layoutopts)
+         xf86Info.aiglx = value;
+         xf86Info.aiglxFrom = X_CONFIG;
+     }
++    if (xf86Info.iglxFrom != X_CMDLINE) {
++        if (xf86GetOptValBool(FlagOptions, FLAG_IGLX, &value)) {
++            enableIndirectGLX = value;
++            xf86Info.iglxFrom = X_CONFIG;
++        }
++    }
+ #endif
+ 
+     /* if we're not hotplugging, force some input devices to exist */
+diff --git a/hw/xfree86/common/xf86Init.c b/hw/xfree86/common/xf86Init.c
+index 70048c5..f53660d 100644
+--- a/hw/xfree86/common/xf86Init.c
++++ b/hw/xfree86/common/xf86Init.c
+@@ -1468,6 +1468,10 @@ ddxProcessArgument(int argc, char **argv, int i)
+         xf86Info.ShareVTs = TRUE;
+         return 1;
+     }
++    if (!strcmp(argv[i], "-iglx") || !strcmp(argv[i], "+iglx")) {
++        xf86Info.iglxFrom = X_CMDLINE;
++        return 0;
++    }
+ 
+     /* OS-specific processing */
+     return xf86ProcessArgument(argc, argv, i);
+diff --git a/hw/xfree86/common/xf86Privstr.h b/hw/xfree86/common/xf86Privstr.h
+index cffa14d..913ec6f 100644
+--- a/hw/xfree86/common/xf86Privstr.h
++++ b/hw/xfree86/common/xf86Privstr.h
+@@ -104,6 +104,7 @@ typedef struct {
+     MessageType dri2From;
+ 
+     Bool autoAddGPU;
++    MessageType iglxFrom;
+ } xf86InfoRec, *xf86InfoPtr;
+ 
+ #ifdef DPMSExtension
+diff --git a/hw/xfree86/man/xorg.conf.man b/hw/xfree86/man/xorg.conf.man
+index 9157fc9..d788d90 100644
+--- a/hw/xfree86/man/xorg.conf.man
++++ b/hw/xfree86/man/xorg.conf.man
+@@ -644,6 +644,10 @@ Default is disabled.
+ .BI "Option \*qAIGLX\*q \*q" boolean \*q
+ enable or disable AIGLX. AIGLX is enabled by default.
+ .TP 7
++.BI "Option \*qIndirectGLX\*q \*q" boolean \*q
++enable or disable indirect GLX contexts. Indirect GLX contexts are enabled by
++default.
++.TP 7
+ .BI "Option \*qDRI2\*q \*q" boolean \*q
+ enable or disable DRI2. DRI2 is disabled by default.
+ .TP 7
+diff --git a/os/utils.c b/os/utils.c
+index b518add..5c1f1e4 100644
+--- a/os/utils.c
++++ b/os/utils.c
+@@ -194,7 +194,7 @@ Bool noGEExtension = FALSE;
+ 
+ Bool CoreDump;
+ 
+-Bool enableIndirectGLX = FALSE;
++Bool enableIndirectGLX = TRUE;
+ 
+ #ifdef PANORAMIX
+ Bool PanoramiXExtensionDisabledHack = FALSE;
+-- 
+2.7.0
+

@@ -1,0 +1,50 @@
+commit ba5153f1e3df1bbcd4aefd98f4d8c40399fc7bbc
+Author: Pranjal Jumde <pjumde@apple.com>
+Date:   Thu Mar 3 11:50:34 2016 -0800
+
+    Bug 759398: Heap use-after-free in xmlDictComputeFastKey <https://bugzilla.gnome.org/show_bug.cgi?id=759398>
+    
+    * parser.c:
+    (xmlParseNCNameComplex): Store start position instead of a
+    pointer to the name since the underlying buffer may change,
+    resulting in a stale pointer being used.
+    
+    Removed test case as they broke on RHEL-6.8
+
+diff --git a/parser.c b/parser.c
+index fd94851..83362f6 100644
+--- a/parser.c
++++ b/parser.c
+@@ -1852,6 +1852,7 @@ static int spacePop(xmlParserCtxtPtr ctxt) {
+ #define CUR (*ctxt->input->cur)
+ #define NXT(val) ctxt->input->cur[(val)]
+ #define CUR_PTR ctxt->input->cur
++#define BASE_PTR ctxt->input->base
+ 
+ #define CMP4( s, c1, c2, c3, c4 ) \
+   ( ((unsigned char *) s)[ 0 ] == c1 && ((unsigned char *) s)[ 1 ] == c2 && \
+@@ -3302,6 +3303,7 @@ xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {
+     int len = 0, l;
+     int c;
+     int count = 0;
++    size_t startPosition = 0;
+ 
+ #ifdef DEBUG
+     nbParseNCNameComplex++;
+@@ -3311,6 +3313,7 @@ xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {
+      * Handler for more complex cases
+      */
+     GROW;
++    startPosition = CUR_PTR - BASE_PTR;
+     c = CUR_CHAR(l);
+     if ((c == ' ') || (c == '>') || (c == '/') || /* accelerators */
+ 	(!xmlIsNameStartChar(ctxt, c) || (c == ':'))) {
+@@ -3339,7 +3342,7 @@ xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {
+         xmlFatalErr(ctxt, XML_ERR_NAME_TOO_LONG, "NCName");
+         return(NULL);
+     }
+-    return(xmlDictLookup(ctxt->dict, ctxt->input->cur - len, len));
++    return(xmlDictLookup(ctxt->dict, (BASE_PTR + startPosition), len));
+ }
+ 
+ /**

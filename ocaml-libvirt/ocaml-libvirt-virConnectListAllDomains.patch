@@ -1,0 +1,62 @@
+diff -Naur ../ocaml-libvirt-0.6.1.0.org/libvirt/libvirt_c_oneoffs.c ./libvirt/libvirt_c_oneoffs.c
+--- ../ocaml-libvirt-0.6.1.0.org/libvirt/libvirt_c_oneoffs.c	2016-11-12 10:48:34.984207189 +0000
++++ ./libvirt/libvirt_c_oneoffs.c	2016-11-12 11:44:10.636826107 +0000
+@@ -21,6 +21,12 @@
+ 
+ /*----------------------------------------------------------------------*/
+ 
++/* For virConnectListAllDomains. */
++#define VIR_DOMAIN_LIST_ACTIVE 1
++#define VIR_DOMAIN_LIST_INACTIVE 2
++#define VIR_DOMAIN_LIST_ALL (VIR_DOMAIN_LIST_ACTIVE | VIR_DOMAIN_LIST_INACTIVE)
++
++
+ CAMLprim value
+ ocaml_libvirt_get_version (value driverv, value unit)
+ {
+@@ -198,9 +204,7 @@
+ #ifdef HAVE_VIRCONNECTLISTALLDOMAINS
+ extern int virConnectListAllDomains (virConnectPtr conn,
+                                      virDomainPtr **domains,
+-                                     virDomainInfo **infos,
+-                                     unsigned long stateflags,
+-                                     unsigned long flags)
++                                     unsigned int flags)
+   __attribute__((weak));
+ #endif
+ #endif
+@@ -216,7 +220,6 @@
+   CAMLlocal2 (v1, v2);
+   virConnectPtr conn = Connect_val (connv);
+   virDomainPtr *domains;
+-  virDomainInfo *infos;
+   int want_info, i, r, flag;
+   unsigned long flags = 0;
+ 
+@@ -239,8 +242,7 @@
+ 
+   WEAK_SYMBOL_CHECK (virConnectListAllDomains);
+   NONBLOCKING (r = virConnectListAllDomains (conn, &domains,
+-                                             want_info ? &infos : NULL,
+-                                             flags, 0));
++                                             flags));
+   CHECK_ERROR (r == -1, conn, "virConnectListAllDomains");
+ 
+   /* Convert the result into a pair of arrays. */
+@@ -256,16 +258,10 @@
+ 
+     for (i = 0; i < r; ++i) {
+       v1 = caml_alloc (5, 0);
+-      Store_field (v1, 0, Val_int (infos[i].state));
+-      v2 = caml_copy_int64 (infos[i].maxMem); Store_field (v1, 1, v2);
+-      v2 = caml_copy_int64 (infos[i].memory); Store_field (v1, 2, v2);
+-      Store_field (v1, 3, Val_int (infos[i].nrVirtCpu));
+-      v2 = caml_copy_int64 (infos[i].cpuTime); Store_field (v1, 4, v2);
+ 
+       Store_field (rv2, i, v1);
+     }
+ 
+-    free (infos);
+   }
+   else
+     rv2 = caml_alloc (0, 0); /* zero-length array */

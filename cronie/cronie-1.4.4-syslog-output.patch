@@ -1,0 +1,20 @@
+diff -up cronie-1.4.4/src/do_command.c.syslog-output cronie-1.4.4/src/do_command.c
+--- cronie-1.4.4/src/do_command.c.syslog-output	2016-05-12 14:03:50.000000000 +0200
++++ cronie-1.4.4/src/do_command.c	2016-07-21 14:00:53.453833507 +0200
+@@ -481,7 +481,6 @@ static void child_process(entry * e, use
+ 				bytes++;
+ 				if (mail)
+ 					putc(ch, mail);
+-			}
+ #if defined(SYSLOG)
+ 				if (SyslogOutput) {
+ 					logbuf[bufidx++] = ch;
+@@ -495,7 +494,7 @@ static void child_process(entry * e, use
+ 					}
+ 				}
+ #endif
+-
++			}
+ 			/* only close pipe if we opened it -- i.e., we're
+ 			 * mailing...
+ 			 */

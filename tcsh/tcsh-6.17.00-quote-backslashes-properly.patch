@@ -1,0 +1,336 @@
+From cf9498cedfee36cc06126bd7d3518404b47201bf Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Tue, 8 Mar 2016 15:45:26 +0000
+Subject: [PATCH 1/7] PR/526: David Kaspar: Quote backslashes properly so that
+ they can be preserved in `` expansions.
+
+---
+ sh.glob.c | 4 +++-
+ sh.lex.c  | 2 +-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/sh.glob.c b/sh.glob.c
+index 0241a01..04f2040 100644
+--- a/sh.glob.c
++++ b/sh.glob.c
+@@ -868,7 +868,9 @@ backeval(struct blk_buf *bb, struct Strbuf *word, Char *cp, int literal)
+ 	    if (!quoted && (c == ' ' || c == '\t'))
+ 		break;
+ 	    cnt++;
+-	    Strbuf_append1(word, c | quoted);
++	    if (c == '\\' || quoted)
++		c |= QUOTE;
++	    Strbuf_append1(word, c);
+ 	}
+ 	/*
+ 	 * Unless at end-of-file, we will form a new word here if there were
+diff --git a/sh.lex.c b/sh.lex.c
+index 355a868..56782a0 100644
+--- a/sh.lex.c
++++ b/sh.lex.c
+@@ -386,7 +386,7 @@ loop:
+ 			     */
+ 			    c |= QUOTE;
+ 			ungetC(c);
+-			c = '\\';
++			c = '\\' | QUOTE;
+ 		    }
+ 		}
+ 	    }
+-- 
+2.5.5
+
+
+From 9e45dc5b471346173cc3ba87482edf338618b1a6 Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Fri, 13 May 2016 15:08:12 +0000
+Subject: [PATCH 2/7] PR/526: Now that backslashes are quoted, we don't need to
+ handle them specially here. Fixes echo '\n'<enter><ctrl-p> displaying echo
+ '\\n'.
+
+---
+ tc.func.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/tc.func.c b/tc.func.c
+index 472e80a..728ab23 100644
+--- a/tc.func.c
++++ b/tc.func.c
+@@ -120,8 +120,7 @@ expand_lex(const struct wordent *sp0, int from, int to)
+ 		if ((*s & QUOTE)
+ 		    && (((*s & TRIM) == HIST) ||
+ 			(((*s & TRIM) == '\'') && (prev_c != '\\')) ||
+-			(((*s & TRIM) == '\"') && (prev_c != '\\')) ||
+-			(((*s & TRIM) == '\\') && (prev_c != '\\')))) {
++			(((*s & TRIM) == '\"') && (prev_c != '\\')))) {
+ 		    Strbuf_append1(&buf, '\\');
+ 		}
+ 		Strbuf_append1(&buf, *s & TRIM);
+-- 
+2.5.5
+
+
+From d70a193d5afccdd119c32b6d8db7ceecd2213a8f Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Tue, 24 May 2016 19:29:19 +0000
+Subject: [PATCH 3/7]   set myvar=`\echo 1 2 3` and   set myvar=`echo 1 2 3`
+
+should produce the same result for:
+
+$ echo ${myvar[1]}
+1
+
+Don't treat the first character of the string specially. If the whole string
+is quoted, then we are quoted, otherwise not.
+---
+ sh.glob.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/sh.glob.c b/sh.glob.c
+index 04f2040..64d2d2d 100644
+--- a/sh.glob.c
++++ b/sh.glob.c
+@@ -697,7 +697,12 @@ backeval(struct blk_buf *bb, struct Strbuf *word, Char *cp, int literal)
+ 
+     hadnl = 0;
+     icnt = 0;
+-    quoted = (literal || (cp[0] & QUOTE)) ? QUOTE : 0;
++    if (!literal) {
++	for (ip = cp; (*ip & QUOTE) != 0; ip++)
++		continue;
++	quoted = *ip == '\0';
++    } else
++	quoted = literal;
+     faket.t_dtyp = NODE_COMMAND;
+     faket.t_dflg = F_BACKQ;
+     faket.t_dlef = 0;
+-- 
+2.5.5
+
+
+From 4a88682d7d8e7ae16c1f9ef3e40ab40750985218 Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Fri, 27 May 2016 18:07:58 +0000
+Subject: [PATCH 4/7] Add a couple of test for PR/526 (David Kaspar)
+
+---
+ tests/lexical.at | 59 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 59 insertions(+)
+
+diff --git a/tests/lexical.at b/tests/lexical.at
+index 70a2575..f3579d9 100644
+--- a/tests/lexical.at
++++ b/tests/lexical.at
+@@ -544,3 +544,62 @@ arg1 arg2
+ ])
+ 
+ AT_CLEANUP
++
++
++AT_SETUP([Quoting of expansions in `...`])
++
++AT_DATA([batchsystem.properties],
++[[# Path to job setting file
++asyncjobinfo.uri=file:///usr/bns/stbns01/batch/app/properties/asyncjobinfo.xml
++purebatchjobinfo.uri=file:///usr/bns/stbns01/batch/app/properties/purebatchjobinfo.xml
++
++# DB connection info
++jdbc_url=jdbc:oracle:thin:@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=bns03)))
++sub_url=jdbc:oracle:thin:@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=bns03)))
++mss_url=jdbc:oracle:thin:@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=bns03)))
++dbuser=stbns01bt
++dbpasswd=stbns01bt
++
++# OnBatch listener
++run=3
++]])
++AT_DATA([uniformity_test.csh],
++[[
++set SERVICE_NAME_LOG = `cat batchsystem.properties | grep '^jdbc_url' | sed -ne 's/^[^=]*=[^@]*@[:blank:]*\([^$]*\)$/\1/p' | perl -pe 's/\s//g'  |  perl -pe 's/\)/\\\)/g' | perl -pe 's/\(/\\\(/g'`
++echo -n "$SERVICE_NAME_LOG" > ./output1
++
++cat batchsystem.properties | grep '^jdbc_url' | sed -ne 's/^[^=]*=[^@]*@[:blank:]*\([^$]*\)$/\1/p' | perl -pe 's/\s//g'  |  perl -pe 's/\)/\\\)/g' | perl -pe 's/\(/\\\(/g' > ./output2
++
++diff -uprN ./output1 ./output2 >& /dev/null
++
++if ( $? != 0 ) then
++  echo -n 'FAIL: tcsh does not have uniform output when `...` is used!'
++  exit 1
++else
++  echo -n 'OK'
++  exit 0
++endif
++]])
++AT_DATA([quoting_result_test.csh],
++[[
++echo "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP\)(HOST=db\)(PORT=1521\)\)(CONNECT_DATA=(SERVER=DEDICATED\)(SERVICE_NAME=bns03\)\)\)" > ./expected_result
++
++set string = "jdbc_url=jdbc:oracle:thin:@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=bns03)))"
++set SERVICE_NAME_LOG  = `echo "$string" | grep '^jdbc_url' | sed -ne 's/^[^=]*=[^@]*@[:blank:]*\([^$]*\)$/\1/p' | perl -pe 's/\)/\\\)/g'`
++
++echo "$SERVICE_NAME_LOG" > ./actual_result
++
++diff -uprN ./expected_result ./actual_result >& /dev/null
++
++if ( $? != 0 ) then
++  echo -n 'FAIL: tcsh has unexpected result when `...` is used!'
++  exit 1
++else
++  echo -n 'OK'
++  exit 0
++endif
++]])
++AT_CHECK([tcsh -f uniformity_test.csh], 0,[OK])
++AT_CHECK([tcsh -f quoting_result_test.csh], 0, [OK])
++
++AT_CLEANUP
+-- 
+2.5.5
+
+
+From 319dd8b2c50318fbdf544a020753580d12bcb01d Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Fri, 27 May 2016 18:10:15 +0000
+Subject: [PATCH 5/7] Test that in backquote expansions quoting just the first
+ character does not assume that the whole string is quoted (David Kaspar)
+
+---
+ tests/lexical.at | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/tests/lexical.at b/tests/lexical.at
+index f3579d9..3afb153 100644
+--- a/tests/lexical.at
++++ b/tests/lexical.at
+@@ -603,3 +603,24 @@ AT_CHECK([tcsh -f uniformity_test.csh], 0,[OK])
+ AT_CHECK([tcsh -f quoting_result_test.csh], 0, [OK])
+ 
+ AT_CLEANUP
++
++AT_SETUP([\echo for git_tcsh_completion])
++
++AT_DATA([escape_echo.csh],
++[[
++set myvar = `\echo "1 2 3"`
++echo ${myvar}
++echo ${myvar[1]}
++echo ${myvar[2]}
++echo ${myvar[3]}
++exit 0
++]])
++
++AT_CHECK([tcsh -f escape_echo.csh], 0,
++[1 2 3
++1
++2
++3
++])
++
++AT_CLEANUP
+-- 
+2.5.5
+
+
+From 0c398f82bae5946fac74f2c9d9d7d1bc85fd3bfa Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Sat, 9 Jul 2016 00:45:29 +0000
+Subject: [PATCH 6/7] Always send rusage output to stdout (David Kaspar)
+
+---
+ sh.time.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/sh.time.c b/sh.time.c
+index f8ff370..6c59a77 100644
+--- a/sh.time.c
++++ b/sh.time.c
+@@ -293,6 +293,7 @@ prusage(struct tms *bs, struct tms *es, clock_t e, clock_t b)
+ # endif	/* _SEQUENT_ */
+ #endif /* BSDTIMES */
+ {
++    int ohaderr = haderr;
+ #ifdef BSDTIMES
+     time_t t =
+     (r1->ru_utime.tv_sec - r0->ru_utime.tv_sec)	* 100 +
+@@ -334,12 +335,14 @@ prusage(struct tms *bs, struct tms *es, clock_t e, clock_t b)
+     ((e->tv_sec	- b->tv_sec) * 100 + (e->tv_usec - b->tv_usec) / 10000);
+ 
+     cp = "%Uu %Ss %E %P	%X+%Dk %I+%Oio %Fpf+%Ww";
++    haderr = 0;
+ #else /* !BSDTIMES */
+ # ifdef	_SEQUENT_
+     int	    ms = (int)
+     ((e->tv_sec	- b->tv_sec) * 100 + (e->tv_usec - b->tv_usec) / 10000);
+ 
+     cp = "%Uu %Ss %E %P	%I+%Oio	%Fpf+%Ww";
++    haderr = 0;
+ # else /* !_SEQUENT_ */
+ #  ifndef POSIX
+     time_t ms = ((time_t)((e - b) / HZ) * 100) +
+@@ -350,6 +353,7 @@ prusage(struct tms *bs, struct tms *es, clock_t e, clock_t b)
+ #  endif /* POSIX */
+ 
+     cp = "%Uu %Ss %E %P";
++    haderr = 0;
+ 
+     /*
+      * the tms stuff is	not very precise, so we	fudge it.
+@@ -678,6 +682,7 @@ prusage(struct tms *bs, struct tms *es, clock_t e, clock_t b)
+ 		break;
+ 	    }
+     xputchar('\n');
++    haderr = ohaderr;
+ }
+ 
+ #if defined(BSDTIMES) || defined(_SEQUENT_)
+-- 
+2.5.5
+
+
+From b312df2cc59dea28959a6d7cb00c02903f3f5487 Mon Sep 17 00:00:00 2001
+From: christos <christos>
+Date: Sat, 9 Jul 2016 00:49:28 +0000
+Subject: [PATCH 7/7] add new test for time output.
+
+---
+ tests/commands.at | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/tests/commands.at b/tests/commands.at
+index 795ba5e..6fc51b7 100644
+--- a/tests/commands.at
++++ b/tests/commands.at
+@@ -1470,6 +1470,7 @@ OK
+ 
+ AT_CLEANUP
+ 
++
+ AT_SETUP([jobs output])
+ 
+ AT_DATA([jobs_stdout.csh],
+@@ -1487,3 +1488,22 @@ endif
+ AT_CHECK([tcsh -f jobs_stdout.csh], 0, [ignore])
+ 
+ AT_CLEANUP
++
++AT_SETUP([time output])
++
++
++AT_DATA([time_output.csh],
++[[
++set time_output=`time sleep 1 > /dev/null`
++echo $time_output > ./output_result
++
++if ( -z ./output_result) then
++  echo "FAIL: 'time' output is not being displayed to stdout!"
++  exit 1
++else
++  exit 0
++endif
++]])
++AT_CHECK([tcsh -f time_output.csh], 0, [ignore])
++
++AT_CLEANUP
+-- 
+2.5.5
+

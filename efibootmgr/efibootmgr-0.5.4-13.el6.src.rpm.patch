@@ -1,0 +1,30 @@
+diff -ruN rpmbuild-orig/SPECS/efibootmgr.spec rpmbuild/SPECS/efibootmgr.spec
+--- rpmbuild-orig/SPECS/efibootmgr.spec	2015-04-13 19:06:47.000000000 +0200
++++ rpmbuild/SPECS/efibootmgr.spec	2015-08-27 22:40:56.393691376 +0200
+@@ -1,14 +1,14 @@
+ Summary: EFI Boot Manager
+ Name: efibootmgr
+ Version: 0.5.4
+-Release: 13%{?dist}
++Release: 13%{?dist}.0
+ Group: System Environment/Base
+ License: GPLv2+
+ URL: http://linux.dell.com/%{name}/
+ BuildRequires: pciutils-devel, zlib-devel, git
+ BuildRoot: %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXXXX)
+ # EFI/UEFI don't exist on PPC
+-ExclusiveArch: %{ix86} x86_64 ia64
++ExclusiveArch: %{ix86} x86_64 ia64 %{arm}
+ 
+ # for RHEL / Fedora when efibootmgr was part of the elilo package
+ Conflicts: elilo <= 3.6-5
+@@ -58,6 +58,9 @@
+ %doc README INSTALL COPYING
+     
+ %changelog
++* Thu Aug 27 2015 Jacco Ligthart <jacco@redsleeve.org> - 0.5.4-13.0
++- Add ARM architectures
++
+ * Thu Apr 09 2015 Peter Jones <pjones@redhat.com> - 0.5.4-13
+ - Don't pad HD device paths on non-Itanium platforms.
+   Resolves: rhbz#1151681

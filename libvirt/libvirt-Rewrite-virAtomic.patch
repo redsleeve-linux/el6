@@ -1,0 +1,250 @@
+diff -Naur ./src/util/viratomic.h ../libvirt-0.10.2.patched/src/util/viratomic.h
+--- ./src/util/viratomic.h	2012-09-21 02:02:13.000000000 +0000
++++ ../libvirt-0.10.2.patched/src/util/viratomic.h	2016-11-11 19:27:12.371960705 +0000
+@@ -41,7 +41,7 @@
+  * This call acts as a full compiler and hardware memory barrier
+  * (before the get)
+  */
+-VIR_STATIC int virAtomicIntGet(volatile int *atomic)
++int virAtomicIntGet(volatile int *atomic)
+     ATTRIBUTE_NONNULL(1);
+
+ /**
+@@ -51,7 +51,7 @@
+  * This call acts as a full compiler and hardware memory barrier
+  * (after the set)
+  */
+-VIR_STATIC void virAtomicIntSet(volatile int *atomic,
++void virAtomicIntSet(volatile int *atomic,
+                                 int newval)
+     ATTRIBUTE_NONNULL(1);
+
+@@ -64,7 +64,7 @@
+  *
+  * This call acts as a full compiler and hardware memory barrier.
+  */
+-VIR_STATIC int virAtomicIntInc(volatile int *atomic)
++int virAtomicIntInc(volatile int *atomic)
+     ATTRIBUTE_NONNULL(1);
+
+ /**
+@@ -76,7 +76,7 @@
+  *
+  * This call acts as a full compiler and hardware memory barrier.
+  */
+-VIR_STATIC bool virAtomicIntDecAndTest(volatile int *atomic)
++bool virAtomicIntDecAndTest(volatile int *atomic)
+     ATTRIBUTE_NONNULL(1);
+
+ /**
+@@ -92,7 +92,7 @@
+  *
+  * This call acts as a full compiler and hardware memory barrier.
+  */
+-VIR_STATIC bool virAtomicIntCompareExchange(volatile int *atomic,
++bool virAtomicIntCompareExchange(volatile int *atomic,
+                                             int oldval,
+                                             int newval)
+     ATTRIBUTE_NONNULL(1);
+@@ -106,7 +106,7 @@
+  *
+  * This call acts as a full compiler and hardware memory barrier.
+  */
+-VIR_STATIC int virAtomicIntAdd(volatile int *atomic,
++int virAtomicIntAdd(volatile int *atomic,
+                                int val)
+     ATTRIBUTE_NONNULL(1);
+
+@@ -120,7 +120,7 @@
+  * Think of this operation as an atomic version of
+  * { tmp = *atomic; *atomic &= val; return tmp; }
+  */
+-VIR_STATIC unsigned int virAtomicIntAnd(volatile unsigned int *atomic,
++unsigned int virAtomicIntAnd(volatile unsigned int *atomic,
+                                         unsigned int val)
+     ATTRIBUTE_NONNULL(1);
+
+@@ -134,7 +134,7 @@
+  *
+  * This call acts as a full compiler and hardware memory barrier.
+  */
+-VIR_STATIC unsigned int virAtomicIntOr(volatile unsigned int *atomic,
++unsigned int virAtomicIntOr(volatile unsigned int *atomic,
+                                        unsigned int val)
+     ATTRIBUTE_NONNULL(1);
+
+@@ -148,7 +148,7 @@
+  *
+  * This call acts as a full compiler and hardware memory barrier.
+  */
+-VIR_STATIC unsigned int virAtomicIntXor(volatile unsigned int *atomic,
++unsigned int virAtomicIntXor(volatile unsigned int *atomic,
+                                         unsigned int val)
+     ATTRIBUTE_NONNULL(1);
+
+@@ -231,7 +231,7 @@
+ /*
+  * http://msdn.microsoft.com/en-us/library/ms684122(v=vs.85).aspx
+  */
+-static inline int
++inline int
+ virAtomicIntGet(volatile int *atomic)
+ {
+     MemoryBarrier();
+@@ -238,7 +238,7 @@
+     return *atomic;
+ }
+
+-static inline void
++inline void
+ virAtomicIntSet(volatile int *atomic,
+                 int newval)
+ {
+@@ -246,19 +246,19 @@
+     MemoryBarrier();
+ }
+ 
+-static inline int
++inline int
+ virAtomicIntInc(volatile int *atomic)
+ {
+     return InterlockedIncrement((volatile LONG *)atomic);
+ }
+ 
+-static inline bool
++inline bool
+ virAtomicIntDecAndTest(volatile int *atomic)
+ {
+     return InterlockedDecrement((volatile LONG *)atomic) == 0;
+ }
+ 
+-static inline bool
++inline bool
+ virAtomicIntCompareExchange(volatile int *atomic,
+                             int oldval,
+                             int newval)
+@@ -266,28 +266,28 @@
+     return InterlockedCompareExchange((volatile LONG *)atomic, newval, oldval) == oldval;
+ }
+ 
+-static inline int
++inline int
+ virAtomicIntAdd(volatile int *atomic,
+                 int val)
+ {
+     return InterlockedExchangeAdd((volatile LONG *)atomic, val);
+ }
+ 
+-static inline unsigned int
++inline unsigned int
+ virAtomicIntAnd(volatile unsigned int *atomic,
+                 unsigned int val)
+ {
+     return InterlockedAnd((volatile LONG *)atomic, val);
+ }
+ 
+-static inline unsigned int
++inline unsigned int
+ virAtomicIntOr(volatile unsigned int *atomic,
+                unsigned int val)
+ {
+     return InterlockedOr((volatile LONG *)atomic, val);
+ }
+ 
+-static inline unsigned int
++inline unsigned int
+ virAtomicIntXor(volatile unsigned int *atomic,
+                 unsigned int val)
+ {
+@@ -301,7 +301,7 @@
+ 
+ extern pthread_mutex_t virAtomicLock;
+ 
+-static inline int
++inline int
+ virAtomicIntGet(volatile int *atomic)
+ {
+     int value;
+@@ -313,7 +313,7 @@
+     return value;
+ }
+ 
+-static inline void
++inline void
+ virAtomicIntSet(volatile int *atomic,
+                 int value)
+ {
+@@ -322,7 +322,7 @@
+     pthread_mutex_unlock(&virAtomicLock);
+ }
+ 
+-static inline int
++inline int
+ virAtomicIntInc(volatile int *atomic)
+ {
+     int value;
+@@ -334,7 +334,7 @@
+     return value;
+ }
+ 
+-static inline bool
++inline bool
+ virAtomicIntDecAndTest(volatile int *atomic)
+ {
+     bool is_zero;
+@@ -346,7 +346,7 @@
+     return is_zero;
+ }
+ 
+-static inline bool
++inline bool
+ virAtomicIntCompareExchange(volatile int *atomic,
+                             int oldval,
+                             int newval)
+@@ -363,7 +363,7 @@
+     return success;
+ }
+ 
+-static inline int
++inline int
+ virAtomicIntAdd(volatile int *atomic,
+                 int val)
+ {
+@@ -377,7 +377,7 @@
+     return oldval;
+ }
+ 
+-static inline unsigned int
++inline unsigned int
+ virAtomicIntAnd(volatile unsigned int *atomic,
+                 unsigned int val)
+ {
+@@ -391,7 +391,7 @@
+     return oldval;
+ }
+ 
+-static inline unsigned int
++inline unsigned int
+ virAtomicIntOr(volatile unsigned int *atomic,
+                unsigned int val)
+ {
+@@ -405,7 +405,7 @@
+     return oldval;
+ }
+ 
+-static inline unsigned int
++inline unsigned int
+ virAtomicIntXor(volatile unsigned int *atomic,
+                 unsigned int val)
+ {
+diff -Naur ./src/util/virfile.c ../libvirt-0.10.2.patched/src/util/virfile.c
+--- ./src/util/virfile.c	2016-11-11 18:34:09.259502394 +0000
++++ ../libvirt-0.10.2.patched/src/util/virfile.c	2016-11-11 19:28:55.068299351 +0000
+@@ -722,7 +722,6 @@
+     virReportSystemError(ENOSYS,
+                          _("Unable to associate file %s with loop device"),
+                          file);
+-    *dev = NULL;
+     return -1;
+ }
+ 

@@ -1,0 +1,281 @@
+diff -up tar-1.23/src/list.c.orig tar-1.23/src/list.c
+--- tar-1.23/src/list.c.orig	2016-06-14 15:05:27.735609444 +0200
++++ tar-1.23/src/list.c	2016-06-14 15:05:54.808137536 +0200
+@@ -662,7 +662,6 @@ decode_header (union block *header, stru
+ 	}
+     }
+ 
+-  stat_info->archive_file_size = stat_info->stat.st_size;
+   xheader_decode (stat_info);
+ 
+   if (sparse_member_p (stat_info))
+diff -up tar-1.23/src/sparse.c.orig tar-1.23/src/sparse.c
+--- tar-1.23/src/sparse.c.orig	2016-06-14 15:05:27.718609740 +0200
++++ tar-1.23/src/sparse.c	2016-06-14 15:05:54.808137536 +0200
+@@ -917,6 +917,18 @@ pax_sparse_member_p (struct tar_sparse_f
+           || file->stat_info->sparse_major > 0;
+ }
+ 
++/* Start a header that uses the effective (shrunken) file size.  */
++static union block *
++pax_start_header (struct tar_stat_info *st)
++{
++  off_t realsize = st->stat.st_size;
++  union block *blk;
++  st->stat.st_size = st->archive_file_size;
++  blk = start_header (st);
++  st->stat.st_size = realsize;
++  return blk;
++}
++
+ static bool
+ pax_dump_header_0 (struct tar_sparse_file *file)
+ {
+@@ -966,9 +978,7 @@ pax_dump_header_0 (struct tar_sparse_fil
+ 	  return false;
+ 	}
+     }
+-  blk = start_header (file->stat_info);
+-  /* Store the effective (shrunken) file size */
+-  OFF_TO_CHARS (file->stat_info->archive_file_size, blk->header.size);
++  blk = pax_start_header (file->stat_info);
+   finish_header (file->stat_info, blk, block_ordinal);
+   if (save_file_name)
+     {
+@@ -1033,9 +1043,7 @@ pax_dump_header_1 (struct tar_sparse_fil
+   if (strlen (file->stat_info->file_name) > NAME_FIELD_SIZE)
+     file->stat_info->file_name[NAME_FIELD_SIZE] = 0;
+ 
+-  blk = start_header (file->stat_info);
+-  /* Store the effective (shrunken) file size */
+-  OFF_TO_CHARS (file->stat_info->archive_file_size, blk->header.size);
++  blk = pax_start_header (file->stat_info);
+   finish_header (file->stat_info, blk, block_ordinal);
+   free (file->stat_info->file_name);
+   file->stat_info->file_name = save_file_name;
+diff -up tar-1.23/src/tar.h.orig tar-1.23/src/tar.h
+--- tar-1.23/src/tar.h.orig	2016-06-14 15:05:27.702610019 +0200
++++ tar-1.23/src/tar.h	2016-06-14 15:05:54.809137519 +0200
+@@ -326,6 +326,10 @@ struct tar_stat_info
+   size_t sparse_map_size;   /* Size of the sparse map */
+   struct sp_array *sparse_map;
+ 
++  off_t real_size;          /* The real size of sparse file */
++  int   real_size_set;      /* True when GNU.sparse.realsize is set in
++			       archived file */
++
+   size_t xattr_map_size;   /* Size of the xattr map */
+   struct xattr_array *xattr_map;
+ 
+diff -up tar-1.23/src/xheader.c.orig tar-1.23/src/xheader.c
+--- tar-1.23/src/xheader.c.orig	2016-06-14 15:05:27.703610002 +0200
++++ tar-1.23/src/xheader.c	2016-06-14 15:05:54.809137519 +0200
+@@ -712,6 +712,16 @@ xheader_decode (struct tar_stat_info *st
+ 	continue;
+     }
+   run_override_list (keyword_override_list, st);
++
++  /* The archived (effective) file size is always set directly in tar header
++     field, possibly overridden by "size" extended header - in both cases,
++     result is now decoded in st->stat.st_size */
++  st->archive_file_size = st->stat.st_size;
++
++  /* The real file size (given by stat()) may be redefined for sparse
++     files in "GNU.sparse.realsize" extended header */
++  if (st->real_size_set)
++    st->stat.st_size = st->real_size;
+ }
+ 
+ static void
+@@ -1319,7 +1329,10 @@ sparse_size_decoder (struct tar_stat_inf
+ {
+   uintmax_t u;
+   if (decode_num (&u, arg, TYPE_MAXIMUM (off_t), keyword))
+-    st->stat.st_size = u;
++    {
++      st->real_size_set = 1;
++      st->real_size = u;
++    }
+ }
+ 
+ static void
+diff -up tar-1.23/tests/genfile.c.orig tar-1.23/tests/genfile.c
+--- tar-1.23/tests/genfile.c.orig	2009-08-09 09:39:58.000000000 +0200
++++ tar-1.23/tests/genfile.c	2016-06-14 15:05:54.810137501 +0200
+@@ -33,6 +33,7 @@
+ #include <inttostr.h>
+ #include <fcntl.h>
+ #include <sys/stat.h>
++#include <c-ctype.h>
+ #define obstack_chunk_alloc malloc
+ #define obstack_chunk_free free
+ #include <obstack.h>
+@@ -505,6 +506,53 @@ mksparse (int fd, off_t displ, char *mar
+     }
+ }
+ 
++static int
++make_fragment (int fd, char *offstr, char *mapstr)
++{
++  int i;
++  off_t displ = get_size (offstr, 1);
++
++  file_length += displ;
++
++  if (!mapstr || !*mapstr)
++    {
++      mkhole (fd, displ);
++      return 1;
++    }
++  else if (*mapstr == '=')
++    {
++      off_t n = get_size (mapstr + 1, 1);
++
++      switch (pattern)
++	{
++	case DEFAULT_PATTERN:
++	  for (i = 0; i < block_size; i++)
++	    buffer[i] = i & 255;
++	  break;
++	  
++	case ZEROS_PATTERN:
++	  memset (buffer, 0, block_size);
++	  break;
++	}
++
++      if (lseek (fd, displ, SEEK_CUR) == -1)
++	error (EXIT_FAILURE, errno, "lseek");
++      
++      for (; n; n--)
++	{
++	  if (write (fd, buffer, block_size) != block_size)
++	    error (EXIT_FAILURE, errno, "write");
++	  file_length += block_size;
++	}
++    }
++  else
++    {
++      file_length += block_size * strlen (mapstr);
++      mksparse (fd, displ, mapstr);
++    }
++  return 0;
++}
++
+ static void
+ generate_sparse_file (int argc, char **argv)
+ {
+@@ -525,20 +573,33 @@ generate_sparse_file (int argc, char **a
+ 
+   file_length = 0;
+ 
+-  for (i = 0; i < argc; i += 2)
++  while (argc)
+     {
+-      off_t displ = get_size (argv[i], 1);
+-      file_length += displ;
+-
+-      if (i == argc-1)
++      if (argv[0][0] == '-' && argv[0][1] == 0)
+ 	{
+-	  mkhole (fd, displ);
+-	  break;
++	  char buf[256];
++	  while (fgets (buf, sizeof (buf), stdin))
++	    {
++	      size_t n = strlen (buf);
++
++	      while (n > 0 && c_isspace (buf[n-1]))
++		buf[--n] = 0;
++	      
++	      n = strcspn (buf, " \t");
++	      buf[n++] = 0;
++	      while (buf[n] && c_isblank (buf[n]))
++		++n;
++	      make_fragment (fd, buf, buf + n);
++	    }
++	  ++argv;
++	  --argc;
+ 	}
+       else
+ 	{
+-	  file_length += block_size * strlen (argv[i+1]);
+-	  mksparse (fd, displ, argv[i+1]);
++	  if (make_fragment (fd, argv[0], argv[1]))
++	    break;
++	  argc -= 2;
++	  argv += 2;
+ 	}
+     }
+ 
+diff -up tar-1.23/tests/Makefile.am.orig tar-1.23/tests/Makefile.am
+--- tar-1.23/tests/Makefile.am.orig	2016-06-14 15:05:27.743609304 +0200
++++ tar-1.23/tests/Makefile.am	2016-06-14 15:05:54.810137501 +0200
+@@ -134,6 +134,7 @@ TESTSUITE_AT = \
+  sparse02.at\
+  sparse03.at\
+  sparse04.at\
++ sparse05.at\
+  sparsemv.at\
+  sparsemvp.at\
+  spmvp00.at\
+diff -up tar-1.23/tests/sparse05.at.orig tar-1.23/tests/sparse05.at
+--- tar-1.23/tests/sparse05.at.orig	2016-06-14 15:05:54.810137501 +0200
++++ tar-1.23/tests/sparse05.at	2016-06-14 15:05:54.810137501 +0200
+@@ -0,0 +1,46 @@
++# Process this file with autom4te to create testsuite. -*- Autotest -*-
++#
++# Test suite for GNU tar.
++# Copyright 2014 Free Software Foundation, Inc.
++
++# This file is part of GNU tar.
++
++# GNU tar is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 3 of the License, or
++# (at your option) any later version.
++
++# GNU tar is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++AT_SETUP([listing sparse files bigger than 2^33 B])
++AT_KEYWORDS([sparse sparse05])
++
++# Description: If an archive in POSIX.1-2001 archive contained a sparse file
++# member whose real size (excluding zero blocks) is bigger than 2^33 bytes,
++# tar 1.28 would incorrectly list the real member size.
++# Reported by: Pavel Raiskup <praiskup@redhat.com>
++# References: <1359119879.15037.4.camel@raiskup>,
++#             http://lists.gnu.org/archive/html/bug-tar/2013-01/msg00001.html
++
++AT_TAR_CHECK([
++(echo 0 =2560
++for i in `seq 1 999`; do
++    echo 10M =2560
++done) | genfile --sparse --file BIGFILE --block-size 4K - || AT_SKIP_TEST
++tar -f - -c --sparse --posix BIGFILE | tar tvf - | awk '{ print $3, $(NF) }'
++],
++[0],
++[20961034240 BIGFILE
++],
++[],
++[],
++[],
++[pax])
++
++AT_CLEANUP
+diff -up tar-1.23/tests/testsuite.at.orig tar-1.23/tests/testsuite.at
+--- tar-1.23/tests/testsuite.at.orig	2016-06-14 15:05:27.743609304 +0200
++++ tar-1.23/tests/testsuite.at	2016-06-14 15:05:54.810137501 +0200
+@@ -221,6 +221,7 @@ m4_include([sparse01.at])
+ m4_include([sparse02.at])
+ m4_include([sparse03.at])
+ m4_include([sparse04.at])
++m4_include([sparse05.at])
+ m4_include([sparsemv.at])
+ m4_include([spmvp00.at])
+ m4_include([spmvp01.at])

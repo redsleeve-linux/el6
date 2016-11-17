@@ -1,0 +1,54 @@
+commit 7e1c014455ca5241b9d416bf39e2ff357b46461b
+Author: Daniel Veillard <veillard@redhat.com>
+Date:   Tue Feb 9 12:55:29 2016 +0100
+
+    Heap-based buffer overread in xmlNextChar
+    
+    For https://bugzilla.gnome.org/show_bug.cgi?id=759671
+    
+    when the end of the internal subset isn't properly detected
+    xmlParseInternalSubset should just return instead of trying
+    to process input further.
+
+diff --git a/parser.c b/parser.c
+index 3138098..184c433 100644
+--- a/parser.c
++++ b/parser.c
+@@ -8250,6 +8250,7 @@ xmlParseInternalSubset(xmlParserCtxtPtr ctxt) {
+      */
+     if (RAW != '>') {
+ 	xmlFatalErr(ctxt, XML_ERR_DOCTYPE_NOT_FINISHED, NULL);
++	return;
+     }
+     NEXT;
+ }
+diff --git a/result/errors/content1.xml.err b/result/errors/content1.xml.err
+index e86c7f9..3d641de 100644
+--- a/result/errors/content1.xml.err
++++ b/result/errors/content1.xml.err
+@@ -12,4 +12,4 @@
+                          ^
+ ./test/errors/content1.xml:7: parser error : Start tag expected, '<' not found
+ <!ELEMENT aElement (a |b * >
+-                           ^
++                         ^
+diff --git a/result/valid/t8.xml.err b/result/valid/t8.xml.err
+index 7ae7bb4..3c76f9e 100644
+--- a/result/valid/t8.xml.err
++++ b/result/valid/t8.xml.err
+@@ -15,4 +15,4 @@ Entity: line 1: parser error : Start tag expected, '<' not found
+           ^
+ Entity: line 1: 
+ &lt;!ELEMENT root (middle) >
+- ^
++^
+diff --git a/result/valid/t8a.xml.err b/result/valid/t8a.xml.err
+index 7ae7bb4..3c76f9e 100644
+--- a/result/valid/t8a.xml.err
++++ b/result/valid/t8a.xml.err
+@@ -15,4 +15,4 @@ Entity: line 1: parser error : Start tag expected, '<' not found
+           ^
+ Entity: line 1: 
+ &lt;!ELEMENT root (middle) >
+- ^
++^

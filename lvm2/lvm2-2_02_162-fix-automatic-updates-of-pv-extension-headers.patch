@@ -1,0 +1,97 @@
+ WHATS_NEW               |  4 ++++
+ lib/metadata/metadata.c | 32 ++++++++++++++++++++++++++------
+ 2 files changed, 30 insertions(+), 6 deletions(-)
+
+diff --git a/WHATS_NEW b/WHATS_NEW
+index d1e12bb..ce58944 100644
+--- a/WHATS_NEW
++++ b/WHATS_NEW
+@@ -1,3 +1,7 @@
++Version 2.02.162 - 
++=================================
++  Fix automatic updates of PV extension headers to newest version.
++
+ Version 2.02.150 - 
+ ==================================
+   Fix flushing of outstanding IO for mirror target (2.02.133).
+diff --git a/lib/metadata/metadata.c b/lib/metadata/metadata.c
+index e255f00..8c327c9 100644
+--- a/lib/metadata/metadata.c
++++ b/lib/metadata/metadata.c
+@@ -3102,7 +3102,7 @@ static int _pv_in_pvs_to_write_list(struct physical_volume *pv, struct volume_gr
+  * Check if any of the PVs in VG still contain old PV headers
+  * and if yes, schedule them for PV header update.
+  */
+-static int _check_old_pv_ext_for_vg(struct volume_group *vg)
++static int _vg_update_old_pv_ext_if_needed(struct volume_group *vg)
+ {
+ 	struct pv_list *pvl;
+ 	struct pv_to_write *pvw;
+@@ -3133,9 +3133,17 @@ static int _check_old_pv_ext_for_vg(struct volume_group *vg)
+ 			}
+ 			pvw->pv = pvl->pv;
+ 			dm_list_add(&vg->pvs_to_write, &pvw->list);
++			log_debug("PV %s has old extension header, updating to newest version.",
++				  pv_dev_name(pvl->pv));
+ 		}
+ 	}
+ 
++	if (!dm_list_empty(&vg->pvs_to_write) &&
++	    (!vg_write(vg) || !vg_commit(vg))) {
++		log_error("Failed to update old PV extension headers in VG %s.", vg->name);
++		return 0;
++	}
++
+ 	return 1;
+ }
+ 
+@@ -3189,11 +3197,6 @@ int vg_write(struct volume_group *vg)
+ 		return 0;
+ 	}
+ 
+-	if (!(_check_old_pv_ext_for_vg(vg))) {
+-		log_error("Failed to schedule physical volume header update.");
+-		return 0;
+-	}
+-
+ 	if (!drop_cached_metadata(vg)) {
+ 		log_error("Unable to drop cached metadata for VG %s.", vg->name);
+ 		return 0;
+@@ -3826,6 +3829,7 @@ static struct volume_group *_vg_read(struct cmd_context *cmd,
+ 	int inconsistent_pvs = 0;
+ 	int inconsistent_mdas = 0;
+ 	int inconsistent_mda_count = 0;
++	int update_old_pv_ext = *consistent;
+ 	unsigned use_precommitted = precommitted;
+ 	struct dm_list *pvids;
+ 	struct pv_list *pvl;
+@@ -3859,6 +3863,14 @@ static struct volume_group *_vg_read(struct cmd_context *cmd,
+ 				lvmetad_vg_clear_outdated_pvs(correct_vg);
+                         }
+ 		}
++
++		if (correct_vg) {
++			if (update_old_pv_ext && !_vg_update_old_pv_ext_if_needed(correct_vg)) {
++				release_vg(correct_vg);
++				return_NULL;
++			}
++		}
++
+ 		return correct_vg;
+ 	}
+ 
+@@ -4299,6 +4311,14 @@ static struct volume_group *_vg_read(struct cmd_context *cmd,
+ 	}
+ 
+ 	*consistent = !inconsistent_pvs;
++
++	if (correct_vg && *consistent) {
++		if (update_old_pv_ext && !_vg_update_old_pv_ext_if_needed(correct_vg)) {
++			release_vg(correct_vg);
++			return_NULL;
++		}
++	}
++
+ 	return correct_vg;
+ }
+ 

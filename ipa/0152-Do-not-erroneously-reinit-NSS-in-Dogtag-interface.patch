@@ -1,0 +1,33 @@
+From 6697e9d761c2b3876ee53ebe3753997e7195a537 Mon Sep 17 00:00:00 2001
+From: Fraser Tweedale <ftweedal@redhat.com>
+Date: Mon, 23 Nov 2015 12:09:32 +1100
+Subject: [PATCH] Do not erroneously reinit NSS in Dogtag interface
+
+The Dogtag interface always attempts to (re)init NSS, which can fail
+with SEC_ERROR_BUSY.  Do not reinitialise NSS when it has already
+been initialised with the given dbdir.
+
+Part of: https://fedorahosted.org/freeipa/ticket/5459
+
+Reviewed-By: Jan Cholasta <jcholast@redhat.com>
+---
+ ipapython/dogtag.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/ipapython/dogtag.py b/ipapython/dogtag.py
+index 9f13a103901d945e29b53a0a468e6774948f80d5..d86e9c9ba664f77db0ce8b2ac1f47f6a9845da15 100644
+--- a/ipapython/dogtag.py
++++ b/ipapython/dogtag.py
+@@ -185,7 +185,8 @@ def https_request(host, port, url, secdir, password, nickname, **kw):
+     request_headers = {"Content-type": "application/x-www-form-urlencoded",
+                        "Accept": "text/plain"}
+     try:
+-        conn = nsslib.NSSConnection(host, port, dbdir=secdir,
++        no_init = secdir == nsslib.current_dbdir
++        conn = nsslib.NSSConnection(host, port, dbdir=secdir, no_init=no_init,
+                                     tls_version_min=api.env.tls_version_min,
+                                     tls_version_max=api.env.tls_version_max)
+         conn.set_debuglevel(0)
+-- 
+2.7.4
+

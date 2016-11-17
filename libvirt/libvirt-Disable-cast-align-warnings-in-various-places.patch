@@ -1,0 +1,148 @@
+diff -Naur ./m4/virt-compile-warnings.m4 ../libvirt-0.10.2.patched/m4/virt-compile-warnings.m4
+--- ./m4/virt-compile-warnings.m4	2016-11-10 00:03:08.961019799 +0000
++++ ../libvirt-0.10.2.patched/m4/virt-compile-warnings.m4	2016-11-10 00:05:34.570817378 +0000
+@@ -76,6 +76,7 @@
+     if test $lv_cv_gcc_pragma_push_works = no; then
+       dontwarn="$dontwarn -Wmissing-prototypes"
+       dontwarn="$dontwarn -Wmissing-declarations"
++      dontwarn="$dontwarn -Wcast-align"
+     fi
+ 
+     # We might fundamentally need some of these disabled forever, but
+diff -Naur ./src/conf/nwfilter_conf.c ../libvirt-0.10.2.patched/src/conf/nwfilter_conf.c
+--- ./src/conf/nwfilter_conf.c	2016-11-10 00:02:58.061035112 +0000
++++ ../libvirt-0.10.2.patched/src/conf/nwfilter_conf.c	2016-11-10 00:08:04.570612930 +0000
+@@ -1803,7 +1803,9 @@
+     while (att[idx].name != NULL) {
+         prop = virXMLPropString(node, att[idx].name);
+ 
++        VIR_WARNINGS_NO_CAST_ALIGN
+         item = (nwItemDesc *)((char *)nwf + att[idx].dataIdx);
++        VIR_WARNINGS_RESET
+         flags = &item->flags;
+         flags_set = match_flag;
+ 
+@@ -3239,7 +3241,9 @@
+     nwItemDesc *item;
+ 
+     while (att[i].name) {
++        VIR_WARNINGS_NO_CAST_ALIGN
+         item = (nwItemDesc *)((char *)def + att[i].dataIdx);
++        VIR_WARNINGS_RESET
+         enum virNWFilterEntryItemFlags flags = item->flags;
+         if ((flags & NWFILTER_ENTRY_ITEM_FLAG_EXISTS)) {
+             if (!typeShown) {
+diff -Naur ./src/internal.h ../libvirt-0.10.2.patched/src/internal.h
+--- ./src/internal.h	2016-11-10 00:02:08.091105606 +0000
++++ ../libvirt-0.10.2.patched/src/internal.h	2016-11-10 00:09:21.260509953 +0000
+@@ -200,6 +200,19 @@
+ #  endif
+ # endif				/* __GNUC__ */
+ 
++
++# if __GNUC_PREREQ (4, 6)
++#  define VIR_WARNINGS_NO_CAST_ALIGN \
++    _Pragma ("GCC diagnostic push") \
++    _Pragma ("GCC diagnostic ignored \"-Wcast-align\"")
++
++#  define VIR_WARNINGS_RESET \
++    _Pragma ("GCC diagnostic pop")
++# else
++#  define VIR_WARNINGS_NO_CAST_ALIGN
++#  define VIR_WARNINGS_RESET
++# endif
++
+ /*
+  * Use this when passing possibly-NULL strings to printf-a-likes.
+  */
+diff -Naur ./src/nwfilter/nwfilter_dhcpsnoop.c ../libvirt-0.10.2.patched/src/nwfilter/nwfilter_dhcpsnoop.c
+--- ./src/nwfilter/nwfilter_dhcpsnoop.c	2016-11-10 00:03:00.181032132 +0000
++++ ../libvirt-0.10.2.patched/src/nwfilter/nwfilter_dhcpsnoop.c	2016-11-10 00:11:20.860351392 +0000
+@@ -992,7 +992,9 @@
+     /* go through the protocol headers */
+     switch (ntohs(pep->eh_type)) {
+     case ETHERTYPE_IP:
++        VIR_WARNINGS_NO_CAST_ALIGN;
+         pip = (struct iphdr *) pep->eh_data;
++        VIR_WARNINGS_RESET;
+         len -= offsetof(virNWFilterSnoopEthHdr, eh_data);
+         break;
+     default:
+@@ -1002,7 +1004,9 @@
+     if (len < 0)
+         return -2;
+ 
++    VIR_WARNINGS_NO_CAST_ALIGN
+     pup = (struct udphdr *) ((char *) pip + (pip->ihl << 2));
++    VIR_WARNINGS_RESET
+     len -= pip->ihl << 2;
+     if (len < 0)
+         return -2;
+diff -Naur ./src/nwfilter/nwfilter_learnipaddr.c ../libvirt-0.10.2.patched/src/nwfilter/nwfilter_learnipaddr.c
+--- ./src/nwfilter/nwfilter_learnipaddr.c	2016-11-10 00:01:49.191132395 +0000
++++ ../libvirt-0.10.2.patched/src/nwfilter/nwfilter_learnipaddr.c	2016-11-10 00:17:57.099842959 +0000
+@@ -332,7 +332,9 @@
+ 
+         case DHCP_OPT_BCASTADDRESS: /* Broadcast address */
+             if (dhcp_opts_len >= 6) {
++                VIR_WARNINGS_NO_CAST_ALIGN
+                 uint32_t *tmp = (uint32_t *)&dhcpopt->value;
++                VIR_WARNINGS_RESET
+                 (*bcastaddr) = ntohl(*tmp);
+             }
+         break;
+@@ -506,8 +508,10 @@
+                 if (etherType == ETHERTYPE_IP &&
+                     (header.len >= ethHdrSize +
+                                    sizeof(struct iphdr))) {
++                    VIR_WARNINGS_NO_CAST_ALIGN
+                     struct iphdr *iphdr = (struct iphdr*)(packet +
+                                                           ethHdrSize);
++                    VIR_WARNINGS_RESET
+                     vmaddr = iphdr->saddr;
+                     /* skip mcast addresses (224.0.0.0 - 239.255.255.255),
+                      * class E (240.0.0.0 - 255.255.255.255, includes eth.
+@@ -522,8 +526,10 @@
+                 } else if (etherType == ETHERTYPE_ARP &&
+                            (header.len >= ethHdrSize +
+                                           sizeof(struct f_arphdr))) {
++                    VIR_WARNINGS_NO_CAST_ALIGN
+                     struct f_arphdr *arphdr = (struct f_arphdr*)(packet +
+                                                          ethHdrSize);
++                    VIR_WARNINGS_RESET
+                     switch (ntohs(arphdr->arphdr.ar_op)) {
+                     case ARPOP_REPLY:
+                         vmaddr = arphdr->ar_sip;
+@@ -543,14 +549,18 @@
+                 if (etherType == ETHERTYPE_IP &&
+                     (header.len >= ethHdrSize +
+                                    sizeof(struct iphdr))) {
++                    VIR_WARNINGS_NO_CAST_ALIGN
+                     struct iphdr *iphdr = (struct iphdr*)(packet +
+                                                           ethHdrSize);
++                    VIR_WARNINGS_RESET
+                     if ((iphdr->protocol == IPPROTO_UDP) &&
+                         (header.len >= ethHdrSize +
+                                        iphdr->ihl * 4 +
+                                        sizeof(struct udphdr))) {
++                        VIR_WARNINGS_NO_CAST_ALIGN
+                         struct udphdr *udphdr= (struct udphdr *)
+                                           ((char *)iphdr + iphdr->ihl * 4);
++                        VIR_WARNINGS_RESET
+                         if (ntohs(udphdr->source) == 67 &&
+                             ntohs(udphdr->dest)   == 68 &&
+                             header.len >= ethHdrSize +
+diff -Naur ./src/storage/storage_backend_mpath.c ../libvirt-0.10.2.patched/src/storage/storage_backend_mpath.c
+--- ./src/storage/storage_backend_mpath.c	2016-11-10 00:01:42.661141666 +0000
++++ ../libvirt-0.10.2.patched/src/storage/storage_backend_mpath.c	2016-11-10 00:18:42.889785802 +0000
+@@ -246,8 +246,10 @@
+ 
+         /* Given the way libdevmapper returns its data, I don't see
+          * any way to avoid this series of casts. */
++        VIR_WARNINGS_NO_CAST_ALIGN
+         next = names->next;
+         names = (struct dm_names *)(((char *)names) + next);
++        VIR_WARNINGS_RESET
+ 
+     } while (next);
+ 

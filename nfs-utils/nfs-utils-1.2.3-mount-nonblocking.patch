@@ -1,0 +1,180 @@
+diff --git a/support/include/nfslib.h b/support/include/nfslib.h
+index 2b2e9cf..ae7c462 100644
+--- a/support/include/nfslib.h
++++ b/support/include/nfslib.h
+@@ -169,6 +169,7 @@ void closeall(int min);
+ 
+ int			svctcp_socket (u_long __number, int __reuse);
+ int			svcudp_socket (u_long __number);
++int			svcsock_nonblock (int __sock);
+ 
+ /* Misc shared code prototypes */
+ size_t  strlcat(char *, const char *, size_t);
+diff --git a/support/nfs/rpcmisc.c b/support/nfs/rpcmisc.c
+index b73187a..23f1aef 100644
+--- a/support/nfs/rpcmisc.c
++++ b/support/nfs/rpcmisc.c
+@@ -104,7 +104,7 @@ makesock(int port, int proto)
+ 		return -1;
+ 	}
+ 
+-	return sock;
++	return svcsock_nonblock(sock);
+ }
+ 
+ void
+diff --git a/support/nfs/svc_create.c b/support/nfs/svc_create.c
+index 5f1d685..141e6e4 100644
+--- a/support/nfs/svc_create.c
++++ b/support/nfs/svc_create.c
+@@ -48,6 +48,8 @@
+ 
+ #ifdef HAVE_LIBTIRPC
+ 
++#include <rpc/rpc_com.h>
++
+ #define SVC_CREATE_XPRT_CACHE_SIZE	(8)
+ static SVCXPRT *svc_create_xprt_cache[SVC_CREATE_XPRT_CACHE_SIZE] = { NULL, };
+ 
+@@ -276,6 +278,12 @@ svc_create_nconf_rand_port(const char *name, const rpcprog_t program,
+ 			"(%s, %u, %s)", name, version, nconf->nc_netid);
+ 		return 0;
+ 	}
++	if (svcsock_nonblock(xprt->xp_fd) < 0) {
++		/* close() already done by svcsock_nonblock() */
++		xprt->xp_fd = RPC_ANYFD;
++		SVC_DESTROY(xprt);
++		return 0;
++	}
+ 
+ 	rpc_createerr.cf_stat = rpc_createerr.cf_error.re_errno = 0;
+ 	if (!svc_reg(xprt, program, version, dispatch, nconf)) {
+@@ -333,6 +341,7 @@ svc_create_nconf_fixed_port(const char *name, const rpcprog_t program,
+ 		int fd;
+ 
+ 		fd = svc_create_sock(ai->ai_addr, ai->ai_addrlen, nconf);
++		fd = svcsock_nonblock(fd);
+ 		if (fd == -1)
+ 			goto out_free;
+ 
+@@ -395,6 +404,7 @@ nfs_svc_create(char *name, const rpcprog_t program, const rpcvers_t version,
+ 	const struct sigaction create_sigaction = {
+ 		.sa_handler	= SIG_IGN,
+ 	};
++	int maxrec = RPC_MAXDATASIZE;
+ 	unsigned int visible, up;
+ 	struct netconfig *nconf;
+ 	void *handlep;
+@@ -406,6 +416,20 @@ nfs_svc_create(char *name, const rpcprog_t program, const rpcvers_t version,
+ 	 */
+ 	(void)sigaction(SIGPIPE, &create_sigaction, NULL);
+ 
++	/*
++	 * Setting MAXREC also enables non-blocking mode for tcp connections.
++	 * This avoids DOS attacks by a client sending many requests but never
++	 * reading the reply:
++	 * - if a second request already is present for reading in the socket,
++	 *   after the first request just was read, libtirpc will break the
++	 *   connection. Thus an attacker can't simply send requests as fast as
++	 *   he can without waiting for the response.
++	 * - if the write buffer of the socket is full, the next write() will
++	 *   fail with EAGAIN. libtirpc will retry the write in a loop for max.
++	 *   2 seconds. If write still fails, the connection will be closed.
++	 */   
++	rpc_control(RPC_SVC_CONNMAXREC_SET, &maxrec);
++
+ 	handlep = setnetconfig();
+ 	if (handlep == NULL) {
+ 		xlog(L_ERROR, "Failed to access local netconfig database: %s",
+diff --git a/support/nfs/svc_socket.c b/support/nfs/svc_socket.c
+index 85b41fa..37d9051 100644
+--- a/support/nfs/svc_socket.c
++++ b/support/nfs/svc_socket.c
+@@ -25,6 +25,7 @@
+ #include <sys/fcntl.h>
+ #include <errno.h>
+ #include "xlog.h"
++#include "nfslib.h"
+ 
+ #ifdef _LIBC
+ # include <libintl.h>
+@@ -36,6 +37,39 @@
+ # define __close(f)		close ((f))
+ #endif
+ 
++int
++svcsock_nonblock(int sock)
++{
++	int flags;
++
++	if (sock < 0)
++		return sock;
++
++	/* This socket might be shared among multiple processes
++	 * if mountd is run multi-threaded.  So it is safest to
++	 * make it non-blocking, else all threads might wake
++	 * one will get the data, and the others will block
++	 * indefinitely.
++	 * In all cases, transaction on this socket are atomic
++	 * (accept for TCP, packet-read and packet-write for UDP)
++	 * so O_NONBLOCK will not confuse unprepared code causing
++	 * it to corrupt messages.
++	 * It generally safest to have O_NONBLOCK when doing an accept
++	 * as if we get a RST after the SYN and before accept runs,
++	 * we can block despite being told there was an acceptable
++	 * connection.
++	 */
++	if ((flags = fcntl(sock, F_GETFL)) < 0)
++		perror(_("svc_socket: can't get socket flags"));
++	else if (fcntl(sock, F_SETFL, flags|O_NONBLOCK) < 0)
++		perror(_("svc_socket: can't set socket flags"));
++	else
++		return sock;
++
++	(void) __close(sock);
++	return -1;
++}
++
+ static int
+ svc_socket (u_long number, int type, int protocol, int reuse)
+ {
+@@ -111,38 +145,7 @@ svc_socket (u_long number, int type, int protocol, int reuse)
+ 	    }
+     }
+ 
+-  if (sock >= 0)
+-    {
+-	    /* This socket might be shared among multiple processes
+-	     * if mountd is run multi-threaded.  So it is safest to
+-	     * make it non-blocking, else all threads might wake
+-	     * one will get the data, and the others will block
+-	     * indefinitely.
+-	     * In all cases, transaction on this socket are atomic
+-	     * (accept for TCP, packet-read and packet-write for UDP)
+-	     * so O_NONBLOCK will not confuse unprepared code causing
+-	     * it to corrupt messages.
+-	     * It generally safest to have O_NONBLOCK when doing an accept
+-	     * as if we get a RST after the SYN and before accept runs,
+-	     * we can block despite being told there was an acceptable
+-	     * connection.
+-	     */
+-	int flags;
+-	if ((flags = fcntl(sock, F_GETFL)) < 0)
+-	  {
+-		  xlog(L_ERROR, "svc_socket: can't get socket flags: %m");
+-	      (void) __close (sock);
+-	      sock = -1;
+-	  }
+-	else if (fcntl(sock, F_SETFL, flags|O_NONBLOCK) < 0)
+-	  {
+-		  xlog(L_ERROR, "svc_socket: can't get socket flags: %m");
+-	      (void) __close (sock);
+-	      sock = -1;
+-	  }
+-    }
+-
+-  return sock;
++  return svcsock_nonblock(sock);
+ }
+ 
+ /*

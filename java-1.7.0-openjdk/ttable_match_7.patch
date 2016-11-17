@@ -1,0 +1,16 @@
+diff -r bca222181d07 src/cpu/ppc/vm/templateTable_ppc_64.cpp
+--- openjdk/hotspot/src/cpu/ppc/vm/templateTable_ppc_64.cpp	Mon Apr 18 07:12:53 2016 +0100
++++ openjdk/hotspot/src/cpu/ppc/vm/templateTable_ppc_64.cpp	Mon Apr 18 08:26:52 2016 +0100
+@@ -2898,9 +2898,10 @@
+   __ stbx(R17_tos, Rclass_or_obj, Roffset);
+   if (!is_static) { patch_bytecode(Bytecodes::_fast_zputfield, Rbc, Rscratch, true, byte_no); }
+   if (!support_IRIW_for_not_multiple_copy_atomic_cpu) {
+-    __ beq(CR_is_vol, Lvolatile); // Volatile?
++    __ bne(CR_is_vol, Lexit); // Non-volatile?
++    __ fence();
+   }
+-  __ dispatch_epilog(vtos, Bytecodes::length_for(bytecode()));
++  __ b(Lexit);
+ 
+   __ align(32, 28, 28); // Align pop.
+   // __ bind(Lctos);

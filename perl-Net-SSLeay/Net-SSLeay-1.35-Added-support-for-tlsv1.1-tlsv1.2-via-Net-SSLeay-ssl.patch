@@ -1,0 +1,56 @@
+From 29857c2a462a9954d50fd9a8dfa1f49a0778baf8 Mon Sep 17 00:00:00 2001
+From: mikem-guest <mikem-guest@008bcf62-b706-0410-a62e-d321f1c85ab9>
+Date: Mon, 5 May 2014 21:37:08 +0000
+Subject: [PATCH 2/2] Added support for tlsv1.1 tlsv1.2 via
+ $Net::SSLeay::ssl_version. Patch from Andreas Mohr. Improve examples in
+ 'Using other perl modules based on Net::SSLeay'. Patched by Andreas Mohr.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://svn.debian.org/svn/net-ssleay@402 008bcf62-b706-0410-a62e-d321f1c85ab9
+
+Petr Písař: Ported to 1.35.
+
+Signed-off-by: Petr Písař <ppisar@redhat.com>
+---
+ lib/Net/SSLeay.pm | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/lib/Net/SSLeay.pm b/lib/Net/SSLeay.pm
+index 3754c37..199b48b 100644
+--- a/lib/Net/SSLeay.pm
++++ b/lib/Net/SSLeay.pm
+@@ -75,6 +75,8 @@ $Net::SSLeay::trace = 0;  # Do not change here, use
+ # 2 = insist on v2 SSL protocol
+ # 3 = insist on v3 SSL
+ # 10 = insist on TLSv1
++# 11 = insist on TLSv1.1
++# 12 = insist on TLSv1.2
+ # 0 or undef = guess (v23)
+ #
+ $Net::SSLeay::ssl_version = 0;  # don't change here, use 
+@@ -2233,6 +2235,20 @@ sub new_x_ctx {
+     if    ($ssl_version == 2)  { $ctx = CTX_v2_new(); }
+     elsif ($ssl_version == 3)  { $ctx = CTX_v3_new(); }
+     elsif ($ssl_version == 10) { $ctx = CTX_tlsv1_new(); }
++    elsif ($ssl_version == 11) {
++	unless (exists &Net::SSLeay::CTX_tlsv1_1_new) {
++	    warn "ssl_version has been set to 11, but this version of OpenSSL has been compiled without TLSv1.1 support";
++	    return undef;
++	}
++        $ctx = CTX_tlsv1_1_new;
++    }
++    elsif ($ssl_version == 12) {
++	unless (exists &Net::SSLeay::CTX_tlsv1_2_new) {
++	    warn "ssl_version has been set to 12, but this version of OpenSSL has been compiled without TLSv1.2 support";
++	    return undef;
++	}
++        $ctx = CTX_tlsv1_2_new;
++    }
+     else                       { $ctx = CTX_new(); }
+     return $ctx;
+ }
+-- 
+2.5.5
+

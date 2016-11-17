@@ -1,0 +1,763 @@
+diff --git a/include/sm/io.h b/include/sm/io.h
+index d3f21d0..19ce2d3 100644
+--- a/include/sm/io.h
++++ b/include/sm/io.h
+@@ -269,7 +269,7 @@ int	 sm_io_close __P((SM_FILE_T *, int SM_NONVOLATILE));
+ SM_FILE_T *sm_io_dup __P((SM_FILE_T *));
+ int	 sm_io_eof __P((SM_FILE_T *));
+ int	 sm_io_error __P((SM_FILE_T *));
+-char	*sm_io_fgets __P((SM_FILE_T *, int, char *, int));
++int	 sm_io_fgets __P((SM_FILE_T *, int, char *, int));
+ int	 sm_io_flush __P((SM_FILE_T *, int SM_NONVOLATILE));
+ 
+ int PRINTFLIKE(3, 4)
+diff --git a/libsm/cf.c b/libsm/cf.c
+index d217875..200a4b4 100644
+--- a/libsm/cf.c
++++ b/libsm/cf.c
+@@ -54,7 +54,7 @@ sm_cf_getopt(path, optc, optv)
+ 	if (cfp == NULL)
+ 		return errno;
+ 
+-	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		p = strchr(buf, '\n');
+ 		if (p != NULL)
+diff --git a/libsm/fget.c b/libsm/fget.c
+index 611748c..1a45310 100644
+--- a/libsm/fget.c
++++ b/libsm/fget.c
+@@ -33,31 +33,32 @@ SM_RCSID("@(#)$Id: fget.c,v 1.24 2001/09/11 04:04:48 gshapiro Exp $")
+ **		n -- size of 'buf'
+ **
+ **	Returns:
+-**		success: returns value of 'buf'
+-**		failure: NULL (no characters were read)
+-**		timeout: NULL and errno set to EAGAIN
++**		success: number of characters
++**		failure: -1
++**		timeout: -1 and errno set to EAGAIN
+ **
+ **	Side Effects:
+ **		may move the file pointer
+ */
+ 
+-char *
++int
+ sm_io_fgets(fp, timeout, buf, n)
+ 	register SM_FILE_T *fp;
+ 	int timeout;
+ 	char *buf;
+ 	register int n;
+ {
+-	register int len;
+-	register char *s;
+-	register unsigned char *p, *t;
++	int len, r;
++	char *s;
++	unsigned char *p, *t;
+ 
+ 	SM_REQUIRE_ISA(fp, SmFileMagic);
+ 	if (n <= 0)		/* sanity check */
+-		return NULL;
++		return -1;
+ 
+ 	s = buf;
+ 	n--;			/* leave space for NUL */
++	r = 0;
+ 	while (n > 0)
+ 	{
+ 		/* If the buffer is empty, refill it. */
+@@ -73,7 +74,7 @@ sm_io_fgets(fp, timeout, buf, n)
+ 			{
+ 				/* EOF/error: stop with partial or no line */
+ 				if (s == buf)
+-					return NULL;
++					return -1;
+ 				break;
+ 			}
+ 			len = fp->f_r;
+@@ -93,18 +94,20 @@ sm_io_fgets(fp, timeout, buf, n)
+ 		if (t != NULL)
+ 		{
+ 			len = ++t - p;
++			r += len;
+ 			fp->f_r -= len;
+ 			fp->f_p = t;
+ 			(void) memcpy((void *) s, (void *) p, len);
+ 			s[len] = 0;
+-			return buf;
++			return r;
+ 		}
+ 		fp->f_r -= len;
+ 		fp->f_p += len;
+ 		(void) memcpy((void *) s, (void *) p, len);
+ 		s += len;
++		r += len;
+ 		n -= len;
+ 	}
+ 	*s = 0;
+-	return buf;
++	return r;
+ }
+diff --git a/mailstats/mailstats.c b/mailstats/mailstats.c
+index f8b57b3..83afc72 100644
+--- a/mailstats/mailstats.c
++++ b/mailstats/mailstats.c
+@@ -68,13 +68,14 @@ main(argc, argv)
+ 	extern char *ctime();
+ 	extern char *optarg;
+ 	extern int optind;
++# define MSOPTS "cC:f:opP"
+ 
+ 	cfile = getcfname(0, 0, SM_GET_SENDMAIL_CF, NULL);
+ 	sfile = NULL;
+ 	mnames = true;
+ 	progmode = false;
+ 	trunc = false;
+-	while ((ch = getopt(argc, argv, "cC:f:opP")) != -1)
++	while ((ch = getopt(argc, argv, MSOPTS)) != -1)
+ 	{
+ 		switch (ch)
+ 		{
+@@ -131,7 +132,7 @@ main(argc, argv)
+ 	(void) sm_strlcpy(mtable[mno++], "*file*", MNAMELEN + 1);
+ 	(void) sm_strlcpy(mtable[mno++], "*include*", MNAMELEN + 1);
+ 
+-	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		register char *b;
+ 		char *s;
+diff --git a/makemap/makemap.c b/makemap/makemap.c
+index cacec00..e23c9ec 100644
+--- a/makemap/makemap.c
++++ b/makemap/makemap.c
+@@ -242,7 +242,7 @@ main(argc, argv)
+ 			      cfile, sm_errstring(errno));
+ 		exit(EX_NOINPUT);
+ 	}
+-	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		register char *b;
+ 
+@@ -392,7 +392,7 @@ main(argc, argv)
+ 	{
+ 		lineno = 0;
+ 		while (sm_io_fgets(smioin, SM_TIME_DEFAULT, ibuf, sizeof ibuf)
+-		       != NULL)
++		       >= 0)
+ 		{
+ 			register char *p;
+ 
+diff --git a/praliases/praliases.c b/praliases/praliases.c
+index d0ee54e..639603a 100644
+--- a/praliases/praliases.c
++++ b/praliases/praliases.c
+@@ -122,7 +122,7 @@ main(argc, argv)
+ 		exit(EX_NOINPUT);
+ 	}
+ 
+-	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(cfp, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		register char *b, *p;
+ 
+diff --git a/rmail/rmail.c b/rmail/rmail.c
+index df0a152..44acae4 100644
+--- a/rmail/rmail.c
++++ b/rmail/rmail.c
+@@ -134,7 +134,7 @@ main(argc, argv)
+ 	{
+ 		/* Get and nul-terminate the line. */
+ 		if (sm_io_fgets(smioin, SM_TIME_DEFAULT, lbuf,
+-				sizeof(lbuf)) == NULL)
++				sizeof(lbuf)) < 0)
+ 			err(EX_DATAERR, "no data");
+ 		if ((p = strchr(lbuf, '\n')) == NULL)
+ 			err(EX_DATAERR, "line too long");
+@@ -378,7 +378,7 @@ main(argc, argv)
+ 	{
+ 		(void) sm_io_fprintf(fp, SM_TIME_DEFAULT, "%s", lbuf);
+ 	} while (sm_io_fgets(smioin, SM_TIME_DEFAULT, lbuf,
+-			     sizeof(lbuf)) != NULL);
++			     sizeof(lbuf)) >= 0);
+ 
+ 	if (sm_io_error(smioin))
+ 		err(EX_TEMPFAIL, "stdin: %s", sm_errstring(errno));
+diff --git a/sendmail/alias.c b/sendmail/alias.c
+index 3eae4ba..cd1227c 100644
+--- a/sendmail/alias.c
++++ b/sendmail/alias.c
+@@ -657,7 +657,7 @@ readaliases(map, af, announcestats, logstats)
+ 	LineNumber = 0;
+ 	naliases = bytes = longest = 0;
+ 	skipping = false;
+-	while (sm_io_fgets(af, SM_TIME_DEFAULT, line, sizeof(line)) != NULL)
++	while (sm_io_fgets(af, SM_TIME_DEFAULT, line, sizeof(line)) >= 0)
+ 	{
+ 		int lhssize, rhssize;
+ 		int c;
+@@ -670,7 +670,7 @@ readaliases(map, af, announcestats, logstats)
+ 		{
+ 			p--;
+ 			if (sm_io_fgets(af, SM_TIME_DEFAULT, p,
+-					SPACELEFT(line, p)) == NULL)
++					SPACELEFT(line, p)) < 0)
+ 				break;
+ 			LineNumber++;
+ 			p = strchr(p, '\n');
+@@ -780,7 +780,7 @@ readaliases(map, af, announcestats, logstats)
+ 
+ 			/* read continuation line */
+ 			if (sm_io_fgets(af, SM_TIME_DEFAULT, p,
+-					sizeof(line) - (p-line)) == NULL)
++					sizeof(line) - (p-line)) < 0)
+ 				break;
+ 			LineNumber++;
+ 
+diff --git a/sendmail/collect.c b/sendmail/collect.c
+index f5d7247..97d6f58 100644
+--- a/sendmail/collect.c
++++ b/sendmail/collect.c
+@@ -300,6 +300,9 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
+ 	unsigned char *pbp;
+ 	unsigned char peekbuf[8];
+ 	char bufbuf[MAXLINE];
++#if _FFR_REJECT_NUL_BYTE
++	bool hasNUL;		/* has at least one NUL input byte */
++#endif /* _FFR_REJECT_NUL_BYTE */
+ 
+ 	df = NULL;
+ 	ignrdot = smtpmode ? false : IgnrDot;
+@@ -315,6 +318,9 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
+ 	hdrslen = 0;
+ 	numhdrs = 0;
+ 	HasEightBits = false;
++#if _FFR_REJECT_NUL_BYTE
++	hasNUL = false;
++#endif /* _FFR_REJECT_NUL_BYTE */
+ 	buf = bp = bufbuf;
+ 	buflen = sizeof(bufbuf);
+ 	pbp = peekbuf;
+@@ -403,6 +409,10 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
+ 							SM_TIME_DEFAULT,
+ 							c);
+ 				}
++#if _FFR_REJECT_NUL_BYTE
++				if (c == '\0')
++					hasNUL = true;
++#endif /* _FFR_REJECT_NUL_BYTE */
+ 				if (c == SM_IO_EOF)
+ 					goto readerr;
+ 				if (SevenBitInput)
+@@ -892,6 +902,14 @@ readerr:
+ 			e->e_bodytype = "7BIT";
+ 	}
+ 
++#if _FFR_REJECT_NUL_BYTE
++	if (hasNUL && RejectNUL)
++	{
++		e->e_status = "5.6.1";
++		usrerrenh(e->e_status, "554 NUL byte not allowed");
++	}
++#endif /* _FFR_REJECT_NUL_BYTE */
++
+ 	if (SuperSafe == SAFE_REALLY && !bitset(EF_FATALERRS, e->e_flags))
+ 	{
+ 		char *dfname = queuename(e, DATAFL_LETTER);
+diff --git a/sendmail/conf.c b/sendmail/conf.c
+index 711a573..93bd013 100644
+--- a/sendmail/conf.c
++++ b/sendmail/conf.c
+@@ -964,7 +964,7 @@ switch_map_find(service, maptype, mapreturn)
+ 			char buf[MAXLINE];
+ 
+ 			while (sm_io_fgets(fp, SM_TIME_DEFAULT, buf,
+-					   sizeof(buf)) != NULL)
++					   sizeof(buf)) >= 0)
+ 			{
+ 				register char *p;
+ 
+@@ -2845,7 +2845,7 @@ uname(name)
+ 		char buf[MAXLINE];
+ 
+ 		while (sm_io_fgets(file, SM_TIME_DEFAULT,
+-				   buf, sizeof(buf)) != NULL)
++				   buf, sizeof(buf)) >= 0)
+ 		{
+ 			if (sm_io_sscanf(buf, "#define sysname \"%*[^\"]\"",
+ 					NODE_LENGTH, name->nodename) > 0)
+@@ -3219,7 +3219,7 @@ usershellok(user, shell)
+ 		return false;
+ 	}
+ 
+-	while (sm_io_fgets(shellf, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(shellf, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		register char *p, *q;
+ 
+@@ -6332,6 +6332,10 @@ char	*FFRCompileOptions[] =
+ 
+ 	"_FFR_REDIRECTEMPTY",
+ #endif /* _FFR_REDIRECTEMPTY */
++#if _FFR_REJECT_NUL_BYTE
++	/* reject NUL bytes in body */
++	"_FFR_REJECT_NUL_BYTE",
++#endif /* _FFR_REJECT_NUL_BYTE */
+ #if _FFR_RESET_MACRO_GLOBALS
+ 	/* Allow macro 'j' to be set dynamically via rulesets. */
+ 	"_FFR_RESET_MACRO_GLOBALS",
+diff --git a/sendmail/control.c b/sendmail/control.c
+index 0b525f7..354d248 100644
+--- a/sendmail/control.c
++++ b/sendmail/control.c
+@@ -301,7 +301,7 @@ control_command(sock, e)
+ 	(void) sm_io_setvbuf(s, SM_TIME_DEFAULT, NULL,
+ 			     SM_IO_NBF, SM_IO_BUFSIZ);
+ 
+-	if (sm_io_fgets(s, SM_TIME_DEFAULT, inp, sizeof(inp)) == NULL)
++	if (sm_io_fgets(s, SM_TIME_DEFAULT, inp, sizeof(inp)) < 0)
+ 	{
+ 		(void) sm_io_close(s, SM_TIME_DEFAULT);
+ 		exit(EX_IOERR);
+diff --git a/sendmail/main.c b/sendmail/main.c
+index b4d5c94..bdf4b62 100644
+--- a/sendmail/main.c
++++ b/sendmail/main.c
+@@ -2100,7 +2100,7 @@ main(argc, argv, envp)
+ 							     "> ");
+ 				(void) sm_io_flush(smioout, SM_TIME_DEFAULT);
+ 				if (sm_io_fgets(smioin, SM_TIME_DEFAULT, buf,
+-						sizeof(buf)) == NULL)
++						sizeof(buf)) < 0)
+ 					testmodeline("/quit", &MainEnvelope);
+ 				p = strchr(buf, '\n');
+ 				if (p != NULL)
+diff --git a/sendmail/map.c b/sendmail/map.c
+index be88685..57dbf6b 100644
+--- a/sendmail/map.c
++++ b/sendmail/map.c
+@@ -5834,7 +5834,7 @@ text_map_lookup(map, name, av, statp)
+ 	key_idx = map->map_keycolno;
+ 	delim = map->map_coldelim;
+ 	while (sm_io_fgets(f, SM_TIME_DEFAULT,
+-			   linebuf, sizeof(linebuf)) != NULL)
++			   linebuf, sizeof(linebuf)) >= 0)
+ 	{
+ 		char *p;
+ 
+@@ -5908,7 +5908,7 @@ text_getcanonname(name, hbsize, statp)
+ 	found = false;
+ 	while (!found &&
+ 		sm_io_fgets(f, SM_TIME_DEFAULT,
+-			    linebuf, sizeof(linebuf)) != NULL)
++			    linebuf, sizeof(linebuf)) >= 0)
+ 	{
+ 		char *p = strpbrk(linebuf, "#\n");
+ 
+diff --git a/sendmail/mci.c b/sendmail/mci.c
+index 2770117..5a6c36a 100644
+--- a/sendmail/mci.c
++++ b/sendmail/mci.c
+@@ -945,7 +945,7 @@ mci_read_persistent(fp, mci)
+ 	sm_io_rewind(fp, SM_TIME_DEFAULT);
+ 	ver = -1;
+ 	LineNumber = 0;
+-	while (sm_io_fgets(fp, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(fp, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		LineNumber++;
+ 		p = strchr(buf, '\n');
+diff --git a/sendmail/mime.c b/sendmail/mime.c
+index af71d79..a4276f3 100644
+--- a/sendmail/mime.c
++++ b/sendmail/mime.c
+@@ -107,6 +107,7 @@ mime8to7(mci, header, e, boundaries, flags, level)
+ {
+ 	register char *p;
+ 	int linelen;
++	int blen;
+ 	int bt;
+ 	off_t offset;
+ 	size_t sectionsize, sectionhighbits;
+@@ -322,13 +323,13 @@ mime8to7(mci, header, e, boundaries, flags, level)
+ 			goto writeerr;
+ 		mci->mci_flags &= ~MCIF_INHEADER;
+ 		bt = MBT_FINAL;
+-		while (sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf, sizeof(buf))
+-			!= NULL)
++		while ((blen = sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf,
++					sizeof(buf))) >= 0)
+ 		{
+ 			bt = mimeboundary(buf, boundaries);
+ 			if (bt != MBT_NOTSEP)
+ 				break;
+-			if (!putxline(buf, strlen(buf), mci,
++			if (!putxline(buf, blen, mci,
+ 					PXLF_MAPFROM|PXLF_STRIP8BIT))
+ 				goto writeerr;
+ 			if (tTd(43, 99))
+@@ -366,13 +367,13 @@ mime8to7(mci, header, e, boundaries, flags, level)
+ 		mci->mci_flags &= ~MCIF_INMIME;
+ 
+ 		/* skip the late "comment" epilogue */
+-		while (sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf, sizeof(buf))
+-			!= NULL)
++		while ((blen = sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf,
++					sizeof(buf))) >= 0)
+ 		{
+ 			bt = mimeboundary(buf, boundaries);
+ 			if (bt != MBT_NOTSEP)
+ 				break;
+-			if (!putxline(buf, strlen(buf), mci,
++			if (!putxline(buf, blen, mci,
+ 					PXLF_MAPFROM|PXLF_STRIP8BIT))
+ 				goto writeerr;
+ 			if (tTd(43, 99))
+@@ -443,16 +444,16 @@ mime8to7(mci, header, e, boundaries, flags, level)
+ 			       DATAFL_LETTER, e->e_id);
+ 
+ 		/* do a scan of this body type to count character types */
+-		while (sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf, sizeof(buf))
+-			!= NULL)
++		while ((blen = sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf,
++					sizeof(buf))) >= 0)
+ 		{
+ 			if (mimeboundary(buf, boundaries) != MBT_NOTSEP)
+ 				break;
+-			for (p = buf; *p != '\0'; p++)
++			for (i = 0; i < blen; i++)
+ 			{
+ 				/* count bytes with the high bit set */
+ 				sectionsize++;
+-				if (bitset(0200, *p))
++				if (bitset(0200, buf[i]))
+ 					sectionhighbits++;
+ 			}
+ 
+@@ -522,8 +523,8 @@ mime8to7(mci, header, e, boundaries, flags, level)
+ 		if (!putline("", mci))
+ 			goto writeerr;
+ 		mci->mci_flags &= ~MCIF_INHEADER;
+-		while (sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf, sizeof(buf))
+-			!= NULL)
++		while ((blen = sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf,
++					sizeof(buf))) >= 0)
+ 		{
+ 			if (!bitset(MCIF_INLONGLINE, mci->mci_flags))
+ 			{
+@@ -531,7 +532,7 @@ mime8to7(mci, header, e, boundaries, flags, level)
+ 				if (bt != MBT_NOTSEP)
+ 					break;
+ 			}
+-			if (!putxline(buf, strlen(buf), mci,
++			if (!putxline(buf, blen, mci,
+ 				      PXLF_MAPFROM|PXLF_NOADDEOL))
+ 				goto writeerr;
+ 		}
+@@ -1033,7 +1034,7 @@ mime7to8(mci, header, e)
+ 	HDR *header;
+ 	register ENVELOPE *e;
+ {
+-	int pxflags;
++	int pxflags, blen;
+ 	register char *p;
+ 	char *cte;
+ 	char **pvp;
+@@ -1066,10 +1067,10 @@ mime7to8(mci, header, e)
+ 		if (!putline("", mci))
+ 			goto writeerr;
+ 		mci->mci_flags &= ~MCIF_INHEADER;
+-		while (sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf, sizeof(buf))
+-			!= NULL)
++		while ((blen = sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf,
++					sizeof(buf))) >= 0)
+ 		{
+-			if (!putline(buf, mci))
++			if (!putxline(buf, blen, mci, PXLF_MAPFROM))
+ 				goto writeerr;
+ 		}
+ 		return true;
+@@ -1177,7 +1178,7 @@ mime7to8(mci, header, e)
+ 		pxflags |= PXLF_NOADDEOL;
+ 		fbufp = fbuf;
+ 		while (sm_io_fgets(e->e_dfp, SM_TIME_DEFAULT, buf,
+-				   sizeof(buf)) != NULL)
++				   sizeof(buf)) >= 0)
+ 		{
+ 			off = mime_fromqp((unsigned char *) buf, &fbufp,
+ 					  &fbuf[MAXLINE] - fbufp);
+diff --git a/sendmail/queue.c b/sendmail/queue.c
+index 194f525..4b175ee 100644
+--- a/sendmail/queue.c
++++ b/sendmail/queue.c
+@@ -2733,7 +2733,7 @@ gatherq(qgrp, qdir, doall, full, more, pnentries)
+ 			i |= NEED_QUARANTINE;
+ 		while (cf != NULL && i != 0 &&
+ 		       sm_io_fgets(cf, SM_TIME_DEFAULT, lbuf,
+-				   sizeof(lbuf)) != NULL)
++				   sizeof(lbuf)) >= 0)
+ 		{
+ 			int c;
+ 			time_t age;
+@@ -4967,7 +4967,7 @@ print_single_queue(qgrp, qdir)
+ 		quarmsg[0] = '\0';
+ 		statmsg[0] = bodytype[0] = '\0';
+ 		qfver = 0;
+-		while (sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++		while (sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 		{
+ 			register int i;
+ 			register char *p;
+diff --git a/sendmail/readcf.c b/sendmail/readcf.c
+index c6d48a8..c2cd2ab 100644
+--- a/sendmail/readcf.c
++++ b/sendmail/readcf.c
+@@ -1132,7 +1132,7 @@ fileclass(class, filename, fmt, ismap, safe, optional)
+ 		return;
+ 	}
+ 
+-	while (sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ #if SCANF
+ 		char wordbuf[MAXLINE + 1];
+@@ -2271,6 +2271,10 @@ static struct optioninfo
+ # define O_RCPTTHROTDELAY	0xe6
+ 	{ "BadRcptThrottleDelay",	O_RCPTTHROTDELAY,	OI_SAFE	},
+ #endif /* _FFR_RCPTTHROTDELAY */
++#if _FFR_REJECT_NUL_BYTE
++# define O_REJECTNUL	0xe9
++	{ "RejectNUL",	O_REJECTNUL,	OI_SAFE	},
++#endif /* _FFR_REJECT_NUL_BYTE */
+ 
+ 	{ NULL,				'\0',		OI_NONE	}
+ };
+@@ -3985,6 +3989,12 @@ setoption(opt, val, safe, sticky, e)
+ 		break;
+ #endif /* _FFR_BADRCPT_SHUTDOWN */
+ 
++#if _FFR_REJECT_NUL_BYTE
++	  case O_REJECTNUL:
++		RejectNUL = atobool(val);
++		break;
++#endif /* _FFR_REJECT_NUL_BYTE */
++
+ 	  default:
+ 		if (tTd(37, 1))
+ 		{
+diff --git a/sendmail/recipient.c b/sendmail/recipient.c
+index 7bd2efc..9ffabfd 100644
+--- a/sendmail/recipient.c
++++ b/sendmail/recipient.c
+@@ -1824,7 +1824,7 @@ resetuid:
+ 	LineNumber = 0;
+ 	ctladdr->q_flags &= ~QSELFREF;
+ 	nincludes = 0;
+-	while (sm_io_fgets(fp, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL &&
++	while (sm_io_fgets(fp, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0 &&
+ 	       !maxreached)
+ 	{
+ 		fixcrlf(buf, true);
+diff --git a/sendmail/savemail.c b/sendmail/savemail.c
+index 4178245..7205730 100644
+--- a/sendmail/savemail.c
++++ b/sendmail/savemail.c
+@@ -204,7 +204,7 @@ savemail(e, sendbody)
+ 				(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
+ 						     "Transcript follows:\r\n");
+ 				while (sm_io_fgets(e->e_xfp, SM_TIME_DEFAULT,
+-						   buf, sizeof(buf)) != NULL &&
++						   buf, sizeof(buf)) >= 0 &&
+ 				       !sm_io_error(smioout))
+ 					(void) sm_io_fputs(smioout,
+ 							   SM_TIME_DEFAULT,
+@@ -854,7 +854,7 @@ errbody(mci, e, separator)
+ 			if (xfile != NULL)
+ 			{
+ 				while (sm_io_fgets(xfile, SM_TIME_DEFAULT, buf,
+-						   sizeof(buf)) != NULL)
++						   sizeof(buf)) >= 0)
+ 				{
+ 					int lbs;
+ 					bool putok;
+@@ -1030,18 +1030,20 @@ errbody(mci, e, separator)
+ 	}
+ 	else
+ 	{
++		int blen;
++
+ 		printheader = true;
+ 		(void) bfrewind(e->e_parent->e_xfp);
+ 		if (e->e_xfp != NULL)
+ 			(void) sm_io_flush(e->e_xfp, SM_TIME_DEFAULT);
+-		while (sm_io_fgets(e->e_parent->e_xfp, SM_TIME_DEFAULT, buf,
+-				   sizeof(buf)) != NULL)
++		while ((blen = sm_io_fgets(e->e_parent->e_xfp, SM_TIME_DEFAULT,
++					buf, sizeof(buf))) >= 0)
+ 		{
+ 			if (printheader && !putline("   ----- Transcript of session follows -----\n",
+ 						mci))
+ 				goto writeerr;
+ 			printheader = false;
+-			if (!putline(buf, mci))
++			if (!putxline(buf, blen, mci, PXLF_MAPFROM))
+ 				goto writeerr;
+ 		}
+ 	}
+@@ -1162,11 +1164,24 @@ errbody(mci, e, separator)
+ 			/* Original-Recipient: -- passed from on high */
+ 			if (q->q_orcpt != NULL)
+ 			{
+-				(void) sm_snprintf(buf, sizeof(buf),
+-						"Original-Recipient: %.800s",
+-						q->q_orcpt);
+-				if (!putline(buf, mci))
+-					goto writeerr;
++				p = strchr(q->q_orcpt, ';');
++
++				/*
++				**  p == NULL shouldn't happen due to
++				**  check in srvrsmtp.c
++				**  we could log an error in this case.
++				*/
++
++				if (p != NULL)
++				{
++					*p = '\0';
++					(void) sm_snprintf(buf, sizeof(buf),
++						"Original-Recipient: %.100s;%.700s",
++						q->q_orcpt, xuntextify(p + 1));
++					*p = ';';
++					if (!putline(buf, mci))
++						goto writeerr;
++				}
+ 			}
+ 
+ 			/* Figure out actual recipient */
+diff --git a/sendmail/sendmail.h b/sendmail/sendmail.h
+index b170c2b..0b40570 100644
+--- a/sendmail/sendmail.h
++++ b/sendmail/sendmail.h
+@@ -2223,6 +2223,9 @@ EXTERN bool	NoAlias;	/* suppress aliasing */
+ EXTERN bool	NoConnect;	/* don't connect to non-local mailers */
+ EXTERN bool	OnlyOneError;	/*  .... or only want to give one SMTP reply */
+ EXTERN bool	QuickAbort;	/*  .... but only if we want a quick abort */
++#if _FFR_REJECT_NUL_BYTE
++EXTERN bool	RejectNUL;	/* reject NUL input byte? */
++#endif /* _FFR_REJECT_NUL_BYTE */
+ #if REQUIRES_DIR_FSYNC
+ EXTERN bool	RequiresDirfsync;	/* requires fsync() for directory */
+ #endif /* REQUIRES_DIR_FSYNC */
+diff --git a/sendmail/srvrsmtp.c b/sendmail/srvrsmtp.c
+index 49016e4..9fed332 100644
+--- a/sendmail/srvrsmtp.c
++++ b/sendmail/srvrsmtp.c
+@@ -4910,7 +4910,7 @@ help(topic, e)
+ 
+ 	len = strlen(topic);
+ 
+-	while (sm_io_fgets(hf, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++	while (sm_io_fgets(hf, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		if (buf[0] == '#')
+ 		{
+diff --git a/sendmail/usersmtp.c b/sendmail/usersmtp.c
+index 2aa1323..ea89696 100644
+--- a/sendmail/usersmtp.c
++++ b/sendmail/usersmtp.c
+@@ -793,7 +793,7 @@ readauth(filename, safe, sai, rpool)
+ 
+ 	lc = 0;
+ 	while (lc <= SASL_MECHLIST &&
+-		sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof(buf)) != NULL)
++		sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0)
+ 	{
+ 		if (buf[0] != '#')
+ 		{
+diff --git a/sendmail/util.c b/sendmail/util.c
+index ab491fb..d518364 100644
+--- a/sendmail/util.c
++++ b/sendmail/util.c
+@@ -1285,8 +1285,7 @@ sfgets(buf, siz, fp, timeout, during)
+ 	char *during;
+ {
+ 	register char *p;
+-	int save_errno;
+-	int io_timeout;
++	int save_errno, io_timeout, l;
+ 
+ 	SM_REQUIRE(siz > 0);
+ 	SM_REQUIRE(buf != NULL);
+@@ -1299,7 +1298,7 @@ sfgets(buf, siz, fp, timeout, during)
+ 	}
+ 
+ 	/* try to read */
+-	p = NULL;
++	l = -1;
+ 	errno = 0;
+ 
+ 	/* convert the timeout to sm_io notation */
+@@ -1307,8 +1306,8 @@ sfgets(buf, siz, fp, timeout, during)
+ 	while (!sm_io_eof(fp) && !sm_io_error(fp))
+ 	{
+ 		errno = 0;
+-		p = sm_io_fgets(fp, io_timeout, buf, siz);
+-		if (p == NULL && errno == EAGAIN)
++		l = sm_io_fgets(fp, io_timeout, buf, siz);
++		if (l < 0 && errno == EAGAIN)
+ 		{
+ 			/* The sm_io_fgets() call timedout */
+ 			if (LogLevel > 1)
+@@ -1328,7 +1327,7 @@ sfgets(buf, siz, fp, timeout, during)
+ 			errno = ETIMEDOUT;
+ 			return NULL;
+ 		}
+-		if (p != NULL || errno != EINTR)
++		if (l >= 0 || errno != EINTR)
+ 			break;
+ 		(void) sm_io_clearerr(fp);
+ 	}
+@@ -1336,7 +1335,7 @@ sfgets(buf, siz, fp, timeout, during)
+ 
+ 	/* clean up the books and exit */
+ 	LineNumber++;
+-	if (p == NULL)
++	if (l < 0)
+ 	{
+ 		buf[0] = '\0';
+ 		if (TrafficLogFile != NULL)
+diff --git a/vacation/vacation.c b/vacation/vacation.c
+index 2ead0b8..9a5089f 100644
+--- a/vacation/vacation.c
++++ b/vacation/vacation.c
+@@ -509,7 +509,7 @@ readheaders(alwaysrespond)
+ 
+ 	cont = false;
+ 	tome = alwaysrespond;
+-	while (sm_io_fgets(smioin, SM_TIME_DEFAULT, buf, sizeof(buf)) &&
++	while (sm_io_fgets(smioin, SM_TIME_DEFAULT, buf, sizeof(buf)) >= 0 &&
+ 	       *buf != '\n')
+ 	{
+ 		switch(*buf)
+@@ -954,7 +954,7 @@ xclude(f)
+ 
+ 	if (f == NULL)
+ 		return;
+-	while (sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof buf))
++	while (sm_io_fgets(f, SM_TIME_DEFAULT, buf, sizeof buf) >= 0)
+ 	{
+ 		if ((p = strchr(buf, '\n')) != NULL)
+ 			*p = '\0';
+@@ -1049,7 +1049,7 @@ sendmessage(myname, msgfn, sender)
+ 		(void) sm_io_fprintf(sfp, SM_TIME_DEFAULT, "To: %s\n", From);
+ 		(void) sm_io_fprintf(sfp, SM_TIME_DEFAULT,
+ 				     "Auto-Submitted: auto-replied\n");
+-		while (sm_io_fgets(mfp, SM_TIME_DEFAULT, buf, sizeof buf))
++		while (sm_io_fgets(mfp, SM_TIME_DEFAULT, buf, sizeof buf) >= 0)
+ 			(void) sm_io_fputs(sfp, SM_TIME_DEFAULT, buf);
+ 		(void) sm_io_close(mfp, SM_TIME_DEFAULT);
+ 		(void) sm_io_close(sfp, SM_TIME_DEFAULT);

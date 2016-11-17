@@ -1,0 +1,11 @@
+--- mozilla/security/nss/lib/freebl/lowhash_vector.c.orig	2015-08-11 21:22:33.331088225 +0100
++++ mozilla/security/nss/lib/freebl/lowhash_vector.c	2015-08-11 21:22:58.281075803 +0100
+@@ -101,7 +101,7 @@
+ static PRCallOnceType loadFreeBLOnce;
+ /* remove when NSPR pratom.h is updated. s390 has atomic intrinsics,
+  * but nspr doesn't know it. */
+-#if defined(__s390__) || defined(__s390x__)
++#if defined(__s390__) || defined(__s390x__) || defined(__arm__)
+ #undef PR_ATOMIC_SET
+ #define PR_ATOMIC_SET(val, newval) __sync_lock_test_and_set(val, newval)
+ #endif

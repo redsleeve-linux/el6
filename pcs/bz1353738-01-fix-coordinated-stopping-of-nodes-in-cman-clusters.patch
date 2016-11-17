@@ -1,0 +1,35 @@
+From 4df9654066577de130df9f0f5a061b3d89a3b69f Mon Sep 17 00:00:00 2001
+From: Tomas Jelinek <tojeline@redhat.com>
+Date: Mon, 18 Jul 2016 15:30:49 +0200
+Subject: [PATCH] fix coordinated stopping of nodes in cman clusters
+
+---
+ pcs/cluster.py | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/pcs/cluster.py b/pcs/cluster.py
+index 0658a4b..9ffdaed 100644
+--- a/pcs/cluster.py
++++ b/pcs/cluster.py
+@@ -1203,7 +1203,17 @@ def stop_cluster(argv):
+ 
+ def stop_cluster_pacemaker():
+     print("Stopping Cluster (pacemaker)...")
+-    output, retval = utils.run(["service", "pacemaker","stop"])
++    command = ["service", "pacemaker", "stop"]
++    if not utils.is_systemctl() and utils.is_rhel6():
++        # If --skip-cman is not specified, pacemaker init script will stop cman
++        # and corosync as well. That way some of the nodes may stop cman before
++        # others stop pacemaker, which leads to quorum loss. We need to keep
++        # quorum until all pacemaker resources are stopped as some of them may
++        # need quorum to be able to stop.
++        # Additional parameters are not supported if "service" command is
++        # redirected to systemd.
++        command.append("--skip-cman")
++    output, retval = utils.run(command)
+     if retval != 0:
+         print(output)
+         utils.err("unable to stop pacemaker")
+-- 
+1.9.1
+

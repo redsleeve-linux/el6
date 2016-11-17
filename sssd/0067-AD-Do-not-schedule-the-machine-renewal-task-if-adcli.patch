@@ -1,0 +1,46 @@
+From 4e97737b0ae42f97963e94a51ecca4cd4745c7ce Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Tue, 17 May 2016 12:00:07 +0200
+Subject: [PATCH 67/68] AD: Do not schedule the machine renewal task if adcli
+ is not executable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Before scheduling the adcli renewal task, check if the renewal program
+(typically adcli) is accessible. If not, do dot schedule the renewal
+task at all.
+
+Resolves:
+https://fedorahosted.org/sssd/ticket/3016
+
+Reviewed-by: Lukáš Slebodník <lslebodn@redhat.com>
+(cherry picked from commit 030b821b3704771b15f58293e2b1259a2c0fc32f)
+(cherry picked from commit 1eae9836ab344f6109bfcefdcf5e6b5611616e0b)
+---
+ src/providers/ad/ad_machine_pw_renewal.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/providers/ad/ad_machine_pw_renewal.c b/src/providers/ad/ad_machine_pw_renewal.c
+index 3d79aa0a600233c7269917b0088bdf07204680d8..b0d2cf64a59ca90982bc343a66bb3843f90610a3 100644
+--- a/src/providers/ad/ad_machine_pw_renewal.c
++++ b/src/providers/ad/ad_machine_pw_renewal.c
+@@ -307,6 +307,15 @@ errno_t ad_machine_account_password_renewal_init(struct be_ctx *be_ctx,
+     int opt_list_size;
+     char *endptr;
+ 
++    ret = access(RENEWAL_PROG_PATH, X_OK);
++    if (ret != 0) {
++        ret = errno;
++        DEBUG(SSSDBG_CONF_SETTINGS,
++              "The helper program ["RENEWAL_PROG_PATH"] for renewal "
++              "doesn't exist [%d]: %s\n", ret, strerror(ret));
++        return EOK;
++    }
++
+     lifetime = dp_opt_get_int(ad_opts->basic,
+                               AD_MAXIMUM_MACHINE_ACCOUNT_PASSWORD_AGE);
+ 
+-- 
+2.4.11
+

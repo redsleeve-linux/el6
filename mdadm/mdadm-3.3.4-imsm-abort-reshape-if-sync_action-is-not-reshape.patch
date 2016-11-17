@@ -1,0 +1,36 @@
+From d7d3809a1b93f9f7b7ca7d874c17632cb3305c76 Mon Sep 17 00:00:00 2001
+From: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Date: Wed, 23 Dec 2015 12:57:11 +0100
+Subject: [PATCH] imsm: abort reshape if sync_action is not "reshape"
+
+When reshape was interrupted, an incorrect checkpoint would be saved in
+the migration record. Change wait_for_reshape_imsm() to return -1 when
+sync_action is not "reshape" to abort early in imsm_manage_reshape()
+without writing the migration record.
+
+Signed-off-by: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Signed-off-by: NeilBrown <neilb@suse.com>
+---
+ super-intel.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/super-intel.c b/super-intel.c
+index e609e0c..c7efa98 100644
+--- a/super-intel.c
++++ b/super-intel.c
+@@ -10300,8 +10300,10 @@ int wait_for_reshape_imsm(struct mdinfo *sra, int ndata)
+ 		sysfs_wait(fd, NULL);
+ 		if (sysfs_get_str(sra, NULL, "sync_action",
+ 				  action, 20) > 0 &&
+-				strncmp(action, "reshape", 7) != 0)
+-			break;
++				strncmp(action, "reshape", 7) != 0) {
++			close(fd);
++			return -1;
++		}
+ 		if (sysfs_fd_get_ll(fd, &completed) < 0) {
+ 			dprintf("cannot read reshape_position (in loop)\n");
+ 			close(fd);
+-- 
+2.5.5
+

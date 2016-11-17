@@ -1,0 +1,14 @@
+diff --git a/src/grep.c b/src/grep.c
+index 6fe6ac9..7071d99 100644
+--- a/src/grep.c
++++ b/src/grep.c
+@@ -2388,7 +2388,8 @@ main (int argc, char **argv)
+         status &= grep_command_line_arg (argv[optind]);
+       while (++optind < argc);
+     }
+-  else if (directories == RECURSE_DIRECTORIES && prepended < last_recursive)
++  else if (directories == RECURSE_DIRECTORIES && prepended < last_recursive
++           && (!(ptr_c = getenv("GREP_LEGACY_R")) || *ptr_c != '1'))
+     {
+       /* Grep through ".", omitting leading "./" from diagnostics.  */
+       filename_prefix_len = 2;

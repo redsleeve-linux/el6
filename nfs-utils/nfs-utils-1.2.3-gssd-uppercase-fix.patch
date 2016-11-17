@@ -1,0 +1,38 @@
+commit 7e07d6f862437d8d2640eb8e4b41c1fc711730d5
+Author: Benjamin Coddington <bcodding@redhat.com>
+Date:   Wed Mar 16 11:31:40 2016 -0400
+
+    gssd: Fix inner-loop variable reuse
+    
+    The var "i" is already in use iterating realmnames.
+    
+    Fixes: "6597e391 gssd:  Don't assume the machine account will be in
+    uppercase"
+    
+    Signed-off-by: Benjamin Coddington <bcodding@redhat.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/gssd/krb5_util.c b/utils/gssd/krb5_util.c
+index 4778a28..5f5d1c3 100644
+--- a/utils/gssd/krb5_util.c
++++ b/utils/gssd/krb5_util.c
+@@ -785,7 +785,7 @@ find_keytab_entry(krb5_context context, krb5_keytab kt, const char *hostname,
+ 	char **realmnames = NULL;
+ 	char myhostname[NI_MAXHOST], targethostname[NI_MAXHOST];
+ 	char myhostad[NI_MAXHOST+1];
+-	int i, j, retval;
++	int i, j, k, retval;
+ 	char *default_realm = NULL;
+ 	char *realm;
+ 	char *k5err = NULL;
+@@ -918,8 +918,8 @@ find_keytab_entry(krb5_context context, krb5_keytab kt, const char *hostname,
+ 				 * moving on to the svcname
+ 				 */
+ 				if (strcmp(svcnames[j],"$") == 0 && !tried_upper) {
+-					for (i = 0; myhostad[i] != '$'; ++i) {
+-						myhostad[i] = toupper(myhostad[i]);
++					for (k = 0; myhostad[k] != '$'; ++k) {
++						myhostad[k] = toupper(myhostad[k]);
+ 					}
+ 					j--;
+ 					tried_upper = 1;

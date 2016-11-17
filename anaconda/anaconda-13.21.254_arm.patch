@@ -1,0 +1,175 @@
+diff -Naur ./configure.ac ../anaconda-13.21.254.patched/configure.ac
+--- ./configure.ac	2016-04-11 19:22:39.000000000 +0000
++++ ../anaconda-13.21.254.patched/configure.ac	2016-08-30 11:00:34.193369230 +0000
+@@ -219,10 +219,6 @@
+ s_arch="`uname -m | sed -e s/i.86/i386/ -e s/sparc.*/sparc/`"
+ AC_SUBST(ARCH, [$s_arch])
+ 
+-AM_CONDITIONAL(IS_FONT_ARCH,
+-  [test x$s_arch != xs390 && test x$s_arch != xs390x &&
+-   test x$s_arch != xppc64])
+-
+ AM_CONDITIONAL(IS_LIVEINST_ARCH,
+   [test x$s_arch == xi386 || test x$s_arch == xx86_64 ||
+    test x$s_arch == xppc || test x$s_arch == xppc64])
+@@ -258,7 +254,6 @@
+                  booty/Makefile
+                  command-stubs/Makefile
+                  docs/Makefile
+-                 fonts/Makefile
+                  gptsync/Makefile
+                  icons/Makefile
+                  icons/hicolor/Makefile
+diff -Naur ./fonts/Makefile.am ../anaconda-13.21.254.patched/fonts/Makefile.am
+--- ./fonts/Makefile.am	2015-02-03 14:11:57.000000000 +0000
++++ ../anaconda-13.21.254.patched/fonts/Makefile.am	1970-01-01 00:00:00.000000000 +0000
+@@ -1,30 +0,0 @@
+-# fonts/Makefile.am for anaconda
+-#
+-# Copyright (C) 2009  Red Hat, Inc.
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU Lesser General Public License as published
+-# by the Free Software Foundation; either version 2.1 of the License, or
+-# (at your option) any later version.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU Lesser General Public License for more details.
+-#
+-# You should have received a copy of the GNU Lesser General Public License
+-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author: David Cantrell <dcantrell@redhat.com>
+-
+-if IS_FONT_ARCH
+-fontsdir        = $(libdir)/$(PACKAGE_NAME)-runtime
+-dist_fonts_DATA = screenfont-$(ARCH).gz
+-endif
+-
+-EXTRA_DIST = screenfont-*.gz updfonts
+-
+-MAINTAINERCLEANFILES = Makefile.in
+-
+-$(ARCH):
+-	./updfonts $(ARCH)
+diff -Naur ./fonts/updfonts ../anaconda-13.21.254.patched/fonts/updfonts
+--- ./fonts/updfonts	2015-02-03 14:11:57.000000000 +0000
++++ ../anaconda-13.21.254.patched/fonts/updfonts	1970-01-01 00:00:00.000000000 +0000
+@@ -1,11 +0,0 @@
+-#!/bin/sh
+-
+-ARCH=$1
+-if [ -z "$ARCH" ]; then
+-    echo "usage: $0 <arch>"
+-    exit 1
+-fi
+-
+-setfont latarcyrheb-sun16
+-../utils/snarffont > screenfont-$ARCH
+-gzip -9 -f screenfont-$ARCH
+diff -Naur ./isys/lang.c ../anaconda-13.21.254.patched/isys/lang.c
+--- ./isys/lang.c	2015-02-03 14:11:57.000000000 +0000
++++ ../anaconda-13.21.254.patched/isys/lang.c	2016-08-30 11:06:06.052489368 +0000
+@@ -40,47 +40,6 @@
+ #include "lang.h"
+ #include "stubs.h"
+ 
+-int isysLoadFont(void) {
+-    unsigned char font[65536];
+-    struct console_font_op cfo;
+-    unsigned short map[E_TABSZ];
+-    struct unimapdesc d;
+-    struct unimapinit u;
+-    struct unipair desc[2048];
+-    gzFile stream;
+-    int rc;
+-
+-#if defined (__s390__) || defined (__s390x__)
+-    return 0;
+-#endif
+-    stream = gunzip_open("/etc/screenfont.gz");
+-    if (!stream)
+-	return -EACCES;
+-
+-    gunzip_read(stream, &cfo, sizeof(cfo));
+-    gunzip_read(stream, font, sizeof(font));
+-    gunzip_read(stream, map, sizeof(map));
+-    gunzip_read(stream, &d.entry_ct, sizeof(d.entry_ct));
+-    d.entries = desc;
+-    gunzip_read(stream, desc, d.entry_ct * sizeof(desc[0]));
+-    gunzip_close(stream);
+-
+-    cfo.data = font;
+-    cfo.op = KD_FONT_OP_SET;
+-
+-    rc = ioctl(1, KDFONTOP, &cfo);
+-    if (rc) return rc;
+-    rc = ioctl(1, PIO_UNIMAPCLR, &u);
+-    if (rc) return rc;
+-    rc = ioctl(1, PIO_UNIMAP, &d);
+-    if (rc) return rc;
+-    rc = ioctl(1, PIO_UNISCRNMAP, map);
+-    if (rc) return rc;
+-    /* activate the font map */
+-    fprintf(stderr, "\033(K");
+-    return 0;
+-}
+-
+ int isysSetUnicodeKeymap(void) {
+     int console;
+ 
+diff -Naur ./isys/lang.h ../anaconda-13.21.254.patched/isys/lang.h
+--- ./isys/lang.h	2015-02-03 14:11:57.000000000 +0000
++++ ../anaconda-13.21.254.patched/isys/lang.h	2016-08-30 11:06:20.142027452 +0000
+@@ -37,7 +37,6 @@
+ };
+ 
+ int loadKeymap(gzFile stream);
+-int isysLoadFont(void);
+ int isysLoadKeymap(char * keymap);
+ int isysSetUnicodeKeymap(void);
+ 
+diff -Naur ./loader/lang.c ../anaconda-13.21.254.patched/loader/lang.c
+--- ./loader/lang.c	2015-02-03 14:11:57.000000000 +0000
++++ ../anaconda-13.21.254.patched/loader/lang.c	2016-08-30 11:03:22.967836007 +0000
+@@ -249,7 +249,6 @@
+     }
+     
+     setLangEnv (choice);
+-    isysLoadFont();
+ 
+     /* clear out top line */
+     buf = alloca(81); /* reserve one byte for \0 */
+diff -Naur ./loader/loader.c ../anaconda-13.21.254.patched/loader/loader.c
+--- ./loader/loader.c	2016-01-21 14:25:47.000000000 +0000
++++ ../anaconda-13.21.254.patched/loader/loader.c	2016-08-30 11:14:41.975628407 +0000
+@@ -349,7 +349,6 @@
+     printf("\033%%G");
+     fflush(stdout);
+ 
+-    isysLoadFont();
+     isysSetUnicodeKeymap();
+ }
+ 
+@@ -407,7 +406,6 @@
+ 	/* enable UTF-8 console */
+ 	printf("\033%%G");
+ 	fflush(stdout);
+-	isysLoadFont();
+ 	
+         if (ioctl(0, TIOCSCTTY, NULL)) {
+             logMessage(ERROR, "could not set new controlling tty");
+diff -Naur ./Makefile.am ../anaconda-13.21.254.patched/Makefile.am
+--- ./Makefile.am	2015-12-14 19:42:49.000000000 +0000
++++ ../anaconda-13.21.254.patched/Makefile.am	2016-08-30 11:01:39.181238616 +0000
+@@ -20,7 +20,7 @@
+ ACLOCAL_AMFLAGS = -I m4
+ 
+ SUBDIRS = isys po loader booty storage textw utils scripts bootdisk \
+-          installclasses iw command-stubs ui docs pixmaps tests fonts \
++          installclasses iw command-stubs ui docs pixmaps tests \
+           gptsync liveinst icons
+ 
+ EXTRA_DIST = config.rpath COPYING pychecker-false-positives \

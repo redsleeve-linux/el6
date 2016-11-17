@@ -1,0 +1,31 @@
+--- magnifier/magnifier.c.org	2016-10-20 18:53:14.413862043 +0000
++++ magnifier/magnifier.c	2016-10-20 18:55:08.813540926 +0000
+@@ -877,7 +877,7 @@
+ 	{
+ 		Magnifier *magnifier = MAGNIFIER (data);
+ 		if (magnifier->priv &&
+-		    GTK_WIDGET_REALIZED (magnifier->priv->w) && 
++		    gtk_widget_get_realized (magnifier->priv->w) && 
+ 		    gmag_gs_check_set_struts (magnifier)) {
+ 			return FALSE;
+ 		}
+--- magnifier/x11/gmag-graphical-server.c.org	2016-10-20 19:03:09.532112804 +0000
++++ magnifier/x11/gmag-graphical-server.c	2016-10-20 19:03:53.321977763 +0000
+@@ -159,7 +159,7 @@
+ #endif
+ 
+ 	if (magnifier &&
+-	    magnifier->priv && magnifier->priv->w && GTK_WIDGET_REALIZED (magnifier->priv->w) &&
++	    magnifier->priv && magnifier->priv->w && gtk_widget_get_realized (magnifier->priv->w) &&
+ 	    magnifier->priv->w->window) 
+ 	{
+ 		Atom atom_strut = gdk_x11_get_xatom_by_name ("_NET_WM_STRUT");
+@@ -249,7 +249,7 @@
+ 	if (data) {
+ 		Magnifier *magnifier = MAGNIFIER (data);
+ 		if (magnifier->priv && magnifier->priv->w &&
+-		    GTK_WIDGET_REALIZED (magnifier->priv->w)) 
++		    gtk_widget_get_realized (magnifier->priv->w)) 
+ 			if (magnifier->priv->w->window) {
+ #ifdef HAVE_OVERLAY
+ 				gint      x, y, over_w, over_h;

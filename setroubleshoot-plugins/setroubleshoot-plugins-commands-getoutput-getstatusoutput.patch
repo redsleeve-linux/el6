@@ -1,0 +1,57 @@
+diff --git a/src/allow_execmod.py b/src/allow_execmod.py
+index bbb09da..0bb0646 100644
+--- a/src/allow_execmod.py
++++ b/src/allow_execmod.py
+@@ -91,10 +91,16 @@ setroubleshoot examined '$FIX_TARGET_PATH' to make sure it was built correctly,
+         self.set_priority(10)
+ 
+     def analyze(self, avc):
+-        import commands
++        import subprocess
+         if avc.has_any_access_in(['execmod']):
+             # MATCH
+-            if (commands.getstatusoutput("eu-readelf -d %s | fgrep -q TEXTREL" % avc.tpath)[0] == 1):
++            # from https://docs.python.org/2.7/library/subprocess.html#replacing-shell-pipeline
++            p1 = subprocess.Popen(['eu-readelf', '-d', avc.tpath], stdout=subprocess.PIPE)
++            p2 = subprocess.Popen(["fgrep", "-q", "TEXTREL"], stdin=p1.stdout, stdout=subprocess.PIPE)
++            p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
++            p1.wait()
++            p2.wait()
++            if p2.returncode == 1:
+                 return self.report(("unsafe"))
+ 
+             mcon = selinux.matchpathcon(avc.tpath.strip('"'), S_IFREG)[1]
+diff --git a/src/allow_execstack.py b/src/allow_execstack.py
+index 006de89..95fdaa0 100644
+--- a/src/allow_execstack.py
++++ b/src/allow_execstack.py
+@@ -23,19 +23,26 @@ _=translation.ugettext
+ from setroubleshoot.util import *
+ from setroubleshoot.Plugin import Plugin
+ 
+-import commands
++from subprocess import Popen, PIPE
+ import sys
+ 
+ def is_execstack(path):
+     if path[0] != "/":
+         return False
+ 
+-    x = commands.getoutput("execstack -q %s" %   path).split()
++    try:
++        x = Popen(['execstack', '-q', path], stdout=PIPE).communicate()[0]
++    except:
++        return False
+     return ( x[0]  == "X" )
+ 
+ def find_execstack(exe, pid):
+     execstacklist = []
+-    for path in commands.getoutput("ldd %s" %   exe).split():
++    try:
++        ldds = Popen(['ldd', exe], stdout=PIPE).communicate()[0].split()
++    except:
++        return []
++    for path in ldds:
+         if is_execstack(path) and path not in execstacklist:
+                 execstacklist.append(path)
+     try:

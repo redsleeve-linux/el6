@@ -1,0 +1,63 @@
+From 942e1cdb4a6a5be02672bc686169c679e775c2be Mon Sep 17 00:00:00 2001
+From: NeilBrown <neilb@suse.com>
+Date: Thu, 18 Feb 2016 15:53:32 +1100
+Subject: [PATCH] super-intel: ensure suspended region is removed when reshape
+ completes.
+
+A recent commit removed a call to abort_reshape() when IMSM reshape
+completed.  An unanticipated result of this is that the suspended
+region is not cleared as it should be.
+So after a reshape, a region of the array will cause all IO to block.
+
+Re-instate the required updates to suspend_{lo,hi} coped from
+abort_reshape().
+
+This is caught (sometimes) by the test suite.
+
+Also fix a couple of typos found while exploring the code.
+
+Reported-by: Ken Moffat <zarniwhoop@ntlworld.com>
+Cc: Artur Paszkiewicz <artur.paszkiewicz@intel.com>
+Fixes: 2139b03c2080 ("imsm: don't call abort_reshape() in imsm_manage_reshape()")
+Signed-off-by: NeilBrown <neilb@suse.com>
+Signed-off-by: Jes Sorensen <Jes.Sorensen@redhat.com>
+---
+ super-intel.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/super-intel.c b/super-intel.c
+index 90b7b6d..ff0506d 100644
+--- a/super-intel.c
++++ b/super-intel.c
+@@ -10465,7 +10465,7 @@ int check_degradation_change(struct mdinfo *info,
+  * Function:	imsm_manage_reshape
+  * Description:	Function finds array under reshape and it manages reshape
+  *		process. It creates stripes backups (if required) and sets
+- *		checheckpoits.
++ *		checkpoints.
+  * Parameters:
+  *	afd		: Backup handle (nattive) - not used
+  *	sra		: general array info
+@@ -10595,7 +10595,7 @@ static int imsm_manage_reshape(
+ 
+ 		start = current_position * 512;
+ 
+-		/* allign reading start to old geometry */
++		/* align reading start to old geometry */
+ 		start_buf_shift = start % old_data_stripe_length;
+ 		start_src = start - start_buf_shift;
+ 
+@@ -10700,6 +10700,10 @@ static int imsm_manage_reshape(
+ 	ret_val = 1;
+ abort:
+ 	free(buf);
++	/* See Grow.c: abort_reshape() for further explanation */
++	sysfs_set_num(sra, NULL, "suspend_lo", 0x7FFFFFFFFFFFFFFFULL);
++	sysfs_set_num(sra, NULL, "suspend_hi", 0);
++	sysfs_set_num(sra, NULL, "suspend_lo", 0);
+ 
+ 	return ret_val;
+ }
+-- 
+2.5.5
+

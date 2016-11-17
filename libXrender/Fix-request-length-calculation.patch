@@ -1,0 +1,31 @@
+From 7887382e59b7a06d6b02501205d543fdf76c8249 Mon Sep 17 00:00:00 2001
+From: Clemens Eisserer <linuxhippy@gmail.com>
+Date: Sat, 23 Nov 2013 22:15:52 -0800
+Subject: Fix request length calculation for XRenderCompositeText32
+
+Request length calculation inside XRenderCompositeText32 is broken for
+the case where the number of glyphs fits exactky inside the last
+xGlyphElt.
+
+In XRenderCompositeText8 and XRenderCompositeText16 this case is
+handled properly, somehow the "-1" got missing in
+XRenderCompositeText32.
+
+Reviewed-by: Keith Packard <keithp@keithp.com>
+
+diff --git a/src/Glyph.c b/src/Glyph.c
+index dbeb77e..48e40c3 100644
+--- a/src/Glyph.c
++++ b/src/Glyph.c
+@@ -665,7 +665,7 @@ XRenderCompositeText32 (Display			    *dpy,
+ 	    len += (SIZEOF (xGlyphElt) + 4) >> 2;
+ 	}
+ 	nchars = elts[i].nchars;
+-	elen = SIZEOF(xGlyphElt) * ((nchars + MAX_32) / MAX_32) + nchars *4;
++	elen = SIZEOF(xGlyphElt) * ((nchars + MAX_32-1) / MAX_32) + nchars *4;
+ 	len += (elen + 3) >> 2;
+     }
+ 
+-- 
+cgit v0.10.2
+

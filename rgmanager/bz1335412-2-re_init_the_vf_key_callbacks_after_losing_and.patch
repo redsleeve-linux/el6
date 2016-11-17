@@ -1,0 +1,36 @@
+From df390e7b2acc983658b0c30cdf0a6394ceb9a173 Mon Sep 17 00:00:00 2001
+From: Ryan McCabe <rmccabe@redhat.com>
+Date: Thu, 9 Jun 2016 10:58:54 -0400
+Subject: [PATCH] rgmanager: Re-init the vf key callbacks after losing and
+ regaining quorum
+
+When central processing is enabled, and we have recovered from quorum
+having been dissolved, reinitialize the vf key callbacks.
+
+Original patch from John Ruemker <jruemker@redhat.com>
+
+Resolves: rhbz#1084053
+Signed-off-by: Ryan McCabe <rmccabe@redhat.com>
+---
+ rgmanager/src/daemons/main.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/rgmanager/src/daemons/main.c b/rgmanager/src/daemons/main.c
+index 6f0b39f..9d5aa9a 100644
+--- a/rgmanager/src/daemons/main.c
++++ b/rgmanager/src/daemons/main.c
+@@ -153,6 +153,11 @@ membership_update(void)
+ 				rg_lockall(L_SYS);
+ 				exit(1);
+ 			}
++
++#ifndef USE_OPENAIS
++			vf_key_init("rg_lockdown", 10, NULL, lock_commit_cb);
++			vf_key_init("Transition-Master", 10, NULL, master_event_callback);
++#endif
+ 		}
+ 	}
+ 
+-- 
+2.5.5
+

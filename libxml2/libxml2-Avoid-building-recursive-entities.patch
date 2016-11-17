@@ -1,0 +1,53 @@
+commit 20102a59f011ccbe47647b0c79d055bc098580ff
+Author: Daniel Veillard <veillard@redhat.com>
+Date:   Mon May 23 12:27:58 2016 +0800
+
+    Avoid building recursive entities
+    
+    For https://bugzilla.gnome.org/show_bug.cgi?id=762100
+    
+    When we detect a recusive entity we should really not
+    build the associated data, moreover if someone bypass
+    libxml2 fatal errors and still tries to serialize a broken
+    entity make sure we don't risk to get ito a recursion
+    
+    * parser.c: xmlParserEntityCheck() don't build if entity loop
+      were found and remove the associated text content
+    * tree.c: xmlStringGetNodeList() avoid a potential recursion
+
+diff --git a/parser.c b/parser.c
+index 948570f..9316b60 100644
+--- a/parser.c
++++ b/parser.c
+@@ -132,7 +132,8 @@ xmlParserEntityCheck(xmlParserCtxtPtr ctxt, size_t size,
+      * entities problems
+      */
+     if ((ent != NULL) && (ent->etype != XML_INTERNAL_PREDEFINED_ENTITY) &&
+-	(ent->content != NULL) && (ent->checked == 0)) {
++	(ent->content != NULL) && (ent->checked == 0) &&
++	(ctxt->errNo != XML_ERR_ENTITY_LOOP)) {
+ 	unsigned long oldnbent = ctxt->nbentities;
+ 	xmlChar *rep;
+ 
+@@ -142,6 +143,9 @@ xmlParserEntityCheck(xmlParserCtxtPtr ctxt, size_t size,
+ 	rep = xmlStringDecodeEntities(ctxt, ent->content,
+ 				  XML_SUBSTITUTE_REF, 0, 0, 0);
+         --ctxt->depth;
++	if (ctxt->errNo == XML_ERR_ENTITY_LOOP) {
++	    ent->content[0] = 0;
++	}
+ 
+ 	ent->checked = (ctxt->nbentities - oldnbent + 1) * 2;
+ 	if (rep != NULL) {
+diff --git a/tree.c b/tree.c
+index bc47ba1..806f874 100644
+--- a/tree.c
++++ b/tree.c
+@@ -1557,6 +1557,7 @@ xmlStringGetNodeList(xmlDocPtr doc, const xmlChar *value) {
+ 			else if ((ent != NULL) && (ent->children == NULL)) {
+ 			    xmlNodePtr temp;
+ 
++			    ent->children = (xmlNodePtr) -1;
+ 			    ent->children = xmlStringGetNodeList(doc,
+ 				    (const xmlChar*)node->content);
+ 			    ent->owner = 1;

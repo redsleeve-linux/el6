@@ -1,0 +1,60 @@
+--- java-1.6.0-openjdk.spec.org	2016-09-17 20:16:37.999552398 +0000
++++ java-1.6.0-openjdk.spec	2016-09-17 20:22:12.208625111 +0000
+@@ -66,6 +66,10 @@
+ %define archbuild sparcv9
+ %define archinstall sparcv9
+ %endif
++%ifarch %{arm}
++%define archbuild arm
++%define archinstall arm
++%endif
+ %ifnarch %{jit_arches}
+ %define archbuild %{_arch}
+ %define archinstall %{_arch}
+@@ -159,7 +163,7 @@
+ 
+ Name:    java-%{javaver}-%{origin}
+ Version: %{javaver}.%{buildver}
+-Release: %{icedteaver}.6%{?dist}
++Release: %{icedteaver}.6%{?dist}.0
+ # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons,
+ # and this change was brought into RHEL-4.  java-1.5.0-ibm packages
+ # also included the epoch in their virtual provides.  This created a
+@@ -203,7 +207,7 @@
+ Patch11:  no_pr2125.patch
+ # PR2808, RH1217131: Backport "8076221: Disable RC4 cipher suites"
+ Patch12: pr2808.patch
+-
++Patch10001: java-1.6.0-gnueabi.patch
+ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+ 
+ 
+@@ -250,7 +254,7 @@
+ BuildRequires: libffi-devel
+ %endif
+ 
+-ExclusiveArch: x86_64 i686
++ExclusiveArch: x86_64 i686 %{arm}
+ 
+ # cacerts build requirement.
+ BuildRequires: openssl
+@@ -369,6 +373,7 @@
+ %patch10 -p1
+ %patch11 -p1
+ %patch12 -p1
++%patch10001 -p1
+ 
+ cp %{SOURCE4} .
+ 
+@@ -896,6 +901,11 @@
+ %doc %{_javadocdir}/%{name}
+ 
+ %changelog
++* Mon Sep 17 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 1:1.6.0.40-1.13.12.6.0
++- Added arm patch from Jacco Ligthart <jacco@redsleeve.org>
++- Add ARM architectures
++- changed target_os checks from linux-gnu to linux-gnueabi for arm build
++
+ * Mon Aug 22 2016 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.40-1.13.12.6
+ - Bump source tarballs to try and really fix TCK failures this time.
+ - Resolves: rhbz#1350044

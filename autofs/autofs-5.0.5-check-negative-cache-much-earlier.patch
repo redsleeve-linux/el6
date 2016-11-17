@@ -1,0 +1,74 @@
+autofs-5.0.5 - check negative cache much earlier
+
+From: Ian Kent <raven@themaw.net>
+
+There is no need to perform the mount thread create and all the
+subsequent code execution if we're only going to exit when we
+finally get around to checking the negative cache.
+---
+
+ daemon/direct.c   |   13 +++++++++++++
+ daemon/indirect.c |   15 +++++++++++++++
+ 2 files changed, 28 insertions(+)
+
+
+--- autofs-5.0.5.orig/daemon/direct.c
++++ autofs-5.0.5/daemon/direct.c
+@@ -1430,6 +1430,7 @@ int handle_packet_missing_direct(struct
+ 		logerr("can't find map entry for (%lu,%lu)",
+ 		    (unsigned long) pkt->dev, (unsigned long) pkt->ino);
+ 		master_source_unlock(ap->entry);
++		master_mutex_unlock();
+ 		pthread_setcancelstate(state, NULL);
+ 		return 1;
+ 	}
+@@ -1463,6 +1464,18 @@ int handle_packet_missing_direct(struct
+ 		master_source_unlock(ap->entry);
+ 		master_mutex_unlock();
+ 		pthread_setcancelstate(state, NULL);
++		return 0;
++	}
++
++	/* Check if we recorded a mount fail for this key */
++	if (me->status >= time(NULL)) {
++		ops->send_fail(ap->logopt,
++			       ioctlfd, pkt->wait_queue_token, -ENOENT);
++		ops->close(ap->logopt, ioctlfd);
++		cache_unlock(me->mc);
++		master_source_unlock(ap->entry);
++		master_mutex_unlock();
++		pthread_setcancelstate(state, NULL);
+ 		return 0;
+ 	}
+ 
+--- autofs-5.0.5.orig/daemon/indirect.c
++++ autofs-5.0.5/daemon/indirect.c
+@@ -796,6 +796,7 @@ int handle_packet_missing_indirect(struc
+ 	struct pending_args *mt;
+ 	struct timespec wait;
+ 	struct timeval now;
++	struct mapent *me;
+ 	int status, state;
+ 
+ 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &state);
+@@ -814,6 +815,20 @@ int handle_packet_missing_indirect(struc
+ 		return 0;
+ 	}
+ 
++	/* Check if we recorded a mount fail for this key anywhere */
++	me = lookup_source_mapent(ap, pkt->name, LKP_DISTINCT);
++	if (me) {
++		if (me->status >= time(NULL)) {
++			ops->send_fail(ap->logopt, ap->ioctlfd,
++				       pkt->wait_queue_token, -ENOENT);
++			cache_unlock(me->mc);
++			master_mutex_unlock();
++			pthread_setcancelstate(state, NULL);
++			return 0;
++		}
++		cache_unlock(me->mc);
++	}
++
+ 	mt = malloc(sizeof(struct pending_args));
+ 	if (!mt) {
+ 		char *estr = strerror_r(errno, buf, MAX_ERR_BUF);

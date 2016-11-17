@@ -1,0 +1,29 @@
+--- gconf-editor-2.28.0/src/gconf-editor-window.c.org	2016-09-21 18:53:59.580496312 +0000
++++ gconf-editor-2.28.0/src/gconf-editor-window.c	2016-09-21 18:56:58.370028190 +0000
+@@ -254,7 +254,7 @@
+ 		gconf_client_set_list (window->client,
+ 				       "/apps/gconf-editor/recents", GCONF_VALUE_STRING, list, NULL);
+ 
+-		if (GTK_WIDGET_VISIBLE (GTK_WIDGET (window->output_window)) &&
++		if (gtk_widget_get_visible (GTK_WIDGET (window->output_window)) &&
+ 	    				window->output_window_type == GCONF_EDITOR_WINDOW_OUTPUT_WINDOW_RECENTS) 
+ 			gedit_output_window_prepend_line (GEDIT_OUTPUT_WINDOW (window->output_window),
+ 							  (gchar*) key, TRUE);
+@@ -613,7 +613,7 @@
+   GConfEditorWindow *gconfwindow = GCONF_EDITOR_WINDOW (data);
+   GdkCursor *cursor;
+ 
+-  if (!GTK_WIDGET_REALIZED (gconfwindow))
++  if (!gtk_widget_get_realized (gconfwindow))
+     return FALSE;
+ 
+   cursor = gdk_cursor_new (GDK_WATCH);
+@@ -633,7 +633,7 @@
+ {
+   GConfEditorWindow *gconfwindow = GCONF_EDITOR_WINDOW (data);
+ 
+-  if (!GTK_WIDGET_REALIZED (gconfwindow))
++  if (!gtk_widget_get_realized (gconfwindow))
+     return;
+ 
+   gdk_window_set_cursor (GTK_WIDGET (gconfwindow)->window, NULL);

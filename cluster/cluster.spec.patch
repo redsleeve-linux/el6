@@ -1,0 +1,11 @@
+--- cluster.spec	2016-08-29 17:11:43.617677038 +0000
++++ cluster.spec.patched	2016-08-29 17:15:00.190330172 +0000
+@@ -344,7 +344,7 @@
+ # BuildRequires: openldap-devel perl(ExtUtils::MakeMaker)
+ BuildRequires: dbus-devel zlib-devel
+ 
+-ExclusiveArch: i686 x86_64
++ExclusiveArch: i686 x86_64 %{arm}
+ 
+ %prep
+ %setup -q -n %{name}-%{version}

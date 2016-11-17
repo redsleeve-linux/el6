@@ -1,0 +1,77 @@
+From ce364521df128208edfc85e52e990a63d4af27e9 Mon Sep 17 00:00:00 2001
+From: mikem-guest <mikem-guest@008bcf62-b706-0410-a62e-d321f1c85ab9>
+Date: Thu, 4 Apr 2013 02:22:21 +0000
+Subject: [PATCH 1/2] Added support for TLSV1_1 and TLSV1_2 methods with
+ SSL_CTX_tlsv1_1_new(), SSL_CTX_tlsv1_2_new(), TLSv1_1_method() and
+ TLSv1_2_method(), where available in the underluying openssl.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://svn.debian.org/svn/net-ssleay@374 008bcf62-b706-0410-a62e-d321f1c85ab9
+
+Petr Písař: Ported to 1.35.
+
+Signed-off-by: Petr Písař <ppisar@redhat.com>
+---
+ SSLeay.xs | 37 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/SSLeay.xs b/SSLeay.xs
+index c6a1e66..dba5095 100644
+--- a/SSLeay.xs
++++ b/SSLeay.xs
+@@ -749,6 +749,28 @@ SSL_CTX_tlsv1_new()
+      OUTPUT:
+      RETVAL
+ 
++#ifdef SSL_TXT_TLSV1_1
++
++SSL_CTX *
++SSL_CTX_tlsv1_1_new()
++     CODE:
++     RETVAL = SSL_CTX_new (TLSv1_1_method());
++     OUTPUT:
++     RETVAL
++
++#endif
++
++#ifdef SSL_TXT_TLSV1_2
++
++SSL_CTX *
++SSL_CTX_tlsv1_2_new()
++     CODE:
++     RETVAL = SSL_CTX_new (TLSv1_2_method());
++     OUTPUT:
++     RETVAL
++
++#endif
++
+ SSL_CTX *
+ SSL_CTX_new_with_method(meth)
+      CODE:
+@@ -1807,6 +1829,21 @@ SSLv3_method()
+ SSL_METHOD *
+ TLSv1_method()
+ 
++#ifdef SSL_TXT_TLSV1_1
++
++SSL_METHOD *
++TLSv1_1_method()
++
++#endif
++
++#ifdef SSL_TXT_TLSV1_2
++
++SSL_METHOD *
++TLSv1_2_method()
++
++#endif
++
++
+ int
+ SSL_set_ssl_method(ssl, method)
+      SSL *          ssl
+-- 
+2.5.5
+
