@@ -55,7 +55,7 @@
 Name: tomcat6
 Epoch: 0
 Version: %{major_version}.%{minor_version}.%{micro_version}
-Release: 98%{?dist}
+Release: 105%{?dist}
 Summary: Apache Servlet/JSP Engine, RI for Servlet %{servletspec}/JSP %{jspspec} API
 
 Group: Networking/Daemons
@@ -127,6 +127,9 @@ Patch46: %{name}-6.0.24-CVE-2016-0706.patch
 Patch47: %{name}-6.0.24-CVE-2016-0714.patch
 Patch48: %{name}-6.0.24-CVE-2015-5345.patch
 Patch49: %{name}-6.0.24-CVE-2016-5388.patch
+Patch50: %{name}-6.0.24-CVE-2016-8745.patch
+Patch51: %{name}-6.0.24-CVE-2016-6816.patch
+Patch52: %{name}-6.0.24-CVE-2017-6056.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 
@@ -349,6 +352,9 @@ pushd %{packdname}
 %patch47 -p0
 %patch48 -p0
 %patch49 -p0
+%patch50 -p0
+%patch51 -p0
+%patch52 -p0
 
 %{__ln_s} $(build-classpath jakarta-taglibs-core) webapps/examples/WEB-INF/lib/jstl.jar
 %{__ln_s} $(build-classpath jakarta-taglibs-standard) webapps/examples/WEB-INF/lib/standard.jar
@@ -691,6 +697,17 @@ fi
 #%{appdir}/manager
 
 %changelog
+* Mon Feb 20 2017 Coty Sutherland <csutherl@redhat.com> 0:6.0.24-105
+- Related: rhbz#1402664 CVE-2016-6816 Adding system property from asfbz-60594 to allow use of some un-encoded characters
+- Related: rhbz#1402664 CVE-2016-6816 Resolving a security regression (2017-6056) caused by CVE-2016-6816
+
+* Thu Jan 26 2017 Coty Sutherland <csutherl@redhat.com> 0:6.0.24-104
+- Related: rhbz#1402664 build. reverting ExcludeArch to fix composes
+
+* Tue Jan 24 2017 Coty Sutherland <csutherl@redhat.com> 0:6.0.24-102
+- Resolves: rhbz#1413589 CVE-2016-8745 tomcat6: tomcat: information disclosure due to incorrect Processor sharing
+- Resolves: rhbz#1402664 CVE-2016-6816 tomcat6: tomcat: HTTP Request smuggling vulnerability due to permitting invalid character in HTTP requests
+
 * Tue Aug 23 2016 Coty Sutherland <csutherl@redhat.com> 0:6.0.24-98
 - Resolves: rhbz#1362210 CVE-2016-5388 Tomcat: CGI sets environmental variable based on user supplied Proxy request header
 - Resolves: rhbz#1368119

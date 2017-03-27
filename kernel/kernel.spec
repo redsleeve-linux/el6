@@ -17,7 +17,7 @@ Summary: The Linux kernel
 #
 # % define buildid .local
 
-%define distro_build 642.6.2
+%define distro_build 642.15.1
 %define signmodules 1
 
 # if patch fuzzy patch applying will be forbidden
@@ -154,7 +154,7 @@ Summary: The Linux kernel
 %endif
 
 # The kernel tarball/base version
-%define kversion 2.6.32-642.6.2.el6
+%define kversion 2.6.32-642.15.1.el6
 
 %define make_target bzImage
 
@@ -544,7 +544,7 @@ BuildConflicts: rhbuildsys(DiskFree) < 7Gb
 %define strip_cmd strip
 %endif
 
-Source0: linux-2.6.32-642.6.2.el6.tar.bz2
+Source0: linux-2.6.32-642.15.1.el6.tar.bz2
 
 Source1: Makefile.common
 
@@ -1740,11 +1740,77 @@ fi
 %endif
 
 %changelog
-* Tue Oct 25 2016 Johnny Hughes <johnny@centos.org> [2.6.32-642.6.2.el6]
+* Fri Feb 24 2017 Johnny Hughes <johnny@centos.org> [2.6.32-642.15.1.el6]
 - Roll in CentOS Branding
 
-* Mon Oct 24 2016 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-642.6.2.el6]
+* Mon Feb 20 2017 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-642.15.1.el6]
+- [net] dccp: fix freeing skb too early for IPV6_RECVPKTINFO (Hannes Frederic Sowa) [1424626 1424628] {CVE-2017-6074}
+
+* Thu Jan 05 2017 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.14.1.el6]
+- [net] sctp: validate chunk len before actually using it (Hangbin Liu) [1399456 1399457] {CVE-2016-9555}
+- [netdrv] qlcnic: add wmb() call in transmit data path (Harish Patil) [1403143 1342659]
+- [kernel] audit: fix a double fetch in audit_log_single_execve_arg() (Paul Moore) [1359302 1359304] {CVE-2016-6136}
+- [fs] nfs: Kill fscache warnings when mounting without -ofsc (David Howells) [1399172 1353844]
+- [fs] nfs: Fix a compile issue when CONFIG_NFS_FSCACHE was undefined (David Howells) [1399172 1353844]
+- [fs] nfs: Don't pass mount data to nfs_fscache_get_super_cookie() (David Howells) [1399172 1353844]
+- [fs] nfsd: handle fileid wraparound (Dave Wysochanski) [1399174 1397552]
+- [scsi] hpsa: correct logical resets (Joseph Szczypek) [1399175 1083110]
+- [scsi] hpsa: generate a controller NMI (Joseph Szczypek) [1399175 1083110]
+- [scsi] hpsa: update driver version to 3.4.10-0-RH3 (Joseph Szczypek) [1399175 1083110]
+- [scsi] hpsa: Check for null devices in ioaccel submission patch (Joseph Szczypek) [1399175 1083110]
+- [scsi] hpsa: check for null device pointers (Joseph Szczypek) [1399175 1083110]
+- [scsi] hpsa: correct skipping masked peripherals (Joseph Szczypek) [1399175 1083110]
+- [scsi] hpsa: generalize external arrays (Joseph Szczypek) [1399175 1083110]
+- [fs] ext4: fix extent tree corruption caused by hole punch (Lukas Czerner) [1397808 1351798]
+- [hv] do not lose pending heartbeat vmbus packets (Vitaly Kuznetsov) [1397739 1378614]
+- [powerpc] ppc64: Fix incorrect return value from __copy_tofrom_user (Gustavo Duarte) [1398185 1387243]
+
+* Wed Nov 23 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.13.1.el6]
+- [net] Fix use after free in the recvmmsg exit path (Davide Caratti) [1390805 1390046] {CVE-2016-7117}
+- [net] vlan: Propagate MAC address to VLANs (Jarod Wilson) [1396479 1381585]
+- [net] tcp: fix use after free in tcp_xmit_retransmit_queue() (Mateusz Guzik) [1379527 1379529] {CVE-2016-6828}
+- [net] netfilter: x_tables: check for bogus target offset (Mateusz Guzik) [1351421 1351422] {CVE-2016-4998}
+- [net] netfilter: x_tables: validate e->target_offset early (Mateusz Guzik) [1351421 1351422] {CVE-2016-4998}
+- [net] netfilter: x_tables: make sure e->next_offset covers remaining blob size (Mateusz Guzik) [1351421 1351422] {CVE-2016-4998}
+- [net] ipv6: Don't change dst->flags using assignments (Marcelo Leitner) [1391974 1389478]
+- [scsi] libfc: Revert: use offload EM instance again (Chris Leech) [1392818 1383078]
+- [netdrv] sfc: report supported link speeds on SFP connections (Jarod Wilson) [1388168 1384621]
+- [drm] vmwgfx: respect 'nomodeset' (Rob Clark) [1392875 1342114]
+- [hv] avoid vfree() on crash (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: handle various crash scenarios (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: Support kexec on ws2012 r2 and above (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: Support handling messages on multiple CPUs (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: remove code duplication in message handling (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: avoid unneeded compiler optimizations in vmbus_wait_for_unload() (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: avoid wait_for_completion() on crash (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: avoid scheduling in interrupt context in vmbus_initiate_unload() (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: don't loose HVMSG_TIMER_EXPIRED messages (Vitaly Kuznetsov) [1385482 1333167]
+- [hv] vmbus: Force all channel messages to be delivered on CPU 0 (Vitaly Kuznetsov) [1385482 1333167]
+- [scsi] mpt3sas: Fix panic when aer correct error occurred (Frank Ramsay) [1396272 1374743]
+- [fs] nfs4.1: Remove a bogus BUG_ON() in nfs4_layoutreturn_done (Steve Dickson) [1385480 1376467]
+- [firmware] dmi_scan: DMI information in sysfs is missing on SMBIOS 3.0 based systems (Steve Best) [1393464 1353807]
+
+* Mon Nov 14 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.12.1.el6]
+- [netdrv] mlx5: Fix RC transport send queue overhead computation (Slava Shwartsman) [1392799 1384212]
+
+* Wed Oct 26 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.11.1.el6]
 - [mm] close FOLL MAP_PRIVATE race (Larry Woodman) [1385116 1385117] {CVE-2016-5195}
+
+* Tue Oct 11 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.10.1.el6]
+- [scsi] fnic: Fix to cleanup aborted IO to avoid device being offlined by mid-layer (Maurizio Lombardi) [1382620 1341298]
+
+* Fri Oct 07 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.9.1.el6]
+- [net] vlan: Fix FCOE_MTU support (Maurizio Lombardi) [1381592 1367250]
+- [s390] mm: fix asce_bits handling with dynamic pagetable levels (Steve Best) [1377472 1341758]
+- [powerpc] eeh: Block PCI configuration space access during EEH (Gustavo Duarte) [1379596 1216944]
+- [fs] ecryptfs: prevent mounts backed by procfs (Mateusz Guzik) [1347101 1347102] {CVE-2016-1583}
+- [s390] mm: four page table levels vs. fork (Hendrik Brueckner) [1341546 1316461] {CVE-2016-2143}
+
+* Fri Sep 16 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.8.1.el6]
+- [fs] lockd: unregister notifier blocks if the service fails to come up completely (Scott Mayhew) [1375637 1346317]
+
+* Wed Sep 07 2016 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-642.7.1.el6]
+- [net] netfilter: ip(6)t_REJECT: fix wrong transport header pointer in TCP reset (William Townsend) [1372266 1343816]
 
 * Thu Aug 25 2016 Denys Vlasenko <dvlasenk@redhat.com> [2.6.32-642.6.1.el6]
 - [net] tcp: make challenge acks less predictable (Florian Westphal) [1355606 1355607] {CVE-2016-5696}

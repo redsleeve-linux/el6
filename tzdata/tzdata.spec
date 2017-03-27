@@ -11,15 +11,17 @@
 
 Summary: Timezone data
 Name: tzdata
-Version: 2016i
-%define tzdata_version 2016i
-%define tzcode_version 2016i
+Version: 2017a
+%define tzdata_version 2017a
+%define tzcode_version 2017a
 Release: 1%{?dist}
 License: Public Domain
 Group: System Environment/Base
 URL: https://www.iana.org/time-zones
 Source0: ftp://ftp.iana.org/tz/releases/tzdata%{tzdata_version}.tar.gz
 Source1: ftp://ftp.iana.org/tz/releases/tzcode%{tzcode_version}.tar.gz
+
+Patch0: 0001-Fix-Liberia-1972-transition-and-pre-1972-abbr.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires: gawk, glibc, perl
@@ -145,6 +147,8 @@ This package contains timezone information for use by Java runtimes.
 %prep
 %setup -q -c -a 1
 
+%patch0 -p1
+
 mkdir javazic
 tar zxf %{SOURCE3} -C javazic
 pushd javazic
@@ -207,7 +211,7 @@ popd
 rm -fr $RPM_BUILD_ROOT
 install -d $RPM_BUILD_ROOT%{_datadir}
 cp -prd zoneinfo $RPM_BUILD_ROOT%{_datadir}
-install -p -m 644 zone.tab iso3166.tab $RPM_BUILD_ROOT%{_datadir}/zoneinfo
+install -p -m 644 zone.tab zone1970.tab iso3166.tab $RPM_BUILD_ROOT%{_datadir}/zoneinfo
 cp -prd javazi $RPM_BUILD_ROOT%{_datadir}/javazi
 
 %if %{with java7}
@@ -233,6 +237,17 @@ rm -rf $RPM_BUILD_ROOT
 %endif
 
 %changelog
+* Thu Mar 02 2017 Patsy Franklin <pfrankli@redhat.com> - 2017a-1
+- Rebase to tzdata-2017a
+  - Mongolia no longer observes DST. (BZ #1425222)
+  - Add upstream patch to fix over-runing of POSIX limit on zone abbreviations.
+- Add zone1970.tab file to the install list. (BZ #1427694)
+
+* Wed Nov 23 2016 Patsy Franklin <pfrankli@redhat.com> - 2016j-1
+- Rebase to tzdata-2016ij
+  - Saratov region of Russia is moving from +03 offset to +04 offset
+    on 2016-12-04.
+
 * Wed Nov 02 2016 Patsy Franklin <pfrankli@redhat.com> - 2016i-1
 - Rebase to tzdata-2016i:
   - Cyprus is now split into two time zones as of 2016-10-30

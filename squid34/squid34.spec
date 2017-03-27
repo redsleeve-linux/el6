@@ -2,7 +2,7 @@
 
 Name:     squid34
 Version:  3.4.14
-Release:  9%{?dist}.3
+Release:  9%{?dist}.4
 Summary:  The Squid proxy caching server
 Epoch:    7
 # See CREDITS for breakdown of non GPLv2+ code
@@ -53,6 +53,8 @@ Patch228: squid-CVE-2016-4554.patch
 Patch229: squid-CVE-2016-4555.patch
 # http://www.squid-cache.org/Advisories/SQUID-2016_9.txt
 Patch230: squid-CVE-2016-4556.patch
+# http://www.squid-cache.org/Advisories/SQUID-2016_11.txt
+Patch231: squid-CVE-2016-10002.patch
 
 Buildroot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 Requires: bash >= 2.0
@@ -115,6 +117,7 @@ lookup program (dnsserver), a program for retrieving FTP data
 %patch228 -p0 -b .CVE-2016-4554
 %patch229 -p0 -b .CVE-2016-4555
 %patch230 -p0 -b .CVE-2016-4556
+%patch231 -p0 -b .CVE-2016-10002
 
 %build
 %ifarch sparcv9 sparc64 s390 s390x
@@ -316,6 +319,10 @@ fi
     chgrp squid /var/cache/samba/winbindd_privileged >/dev/null 2>&1 || :
 
 %changelog
+* Fri Jan 13 2017 Luboš Uhliarik <luhliari@redhat.com> - 7:3.4.14-9.4
+- Resolves: #1412733 - CVE-2016-10002 squid34: squid: Information disclosure
+  in HTTP request processing
+
 * Mon May 09 2016 Luboš Uhliarik <luhliari@redhat.com> - 7:3.4.14-9.3
 - Resolves: #1334499 - CVE-2016-4554 CVE-2016-4555 CVE-2016-4556
   squid34: various flaws

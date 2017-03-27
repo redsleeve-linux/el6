@@ -6,7 +6,7 @@ Version: 9.03.53
 # ppp-watch is GPLv2+, everything else is GPLv2
 License: GPLv2 and GPLv2+
 Group: System Environment/Base
-Release: 1%{?dist}.1
+Release: 1%{?dist}.2
 URL: http://fedorahosted.org/releases/i/n/initscripts/
 Source: http://fedorahosted.org/releases/i/n/initscripts/initscripts-%{version}.tar.bz2
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -48,6 +48,7 @@ Requires(post): /sbin/chkconfig, coreutils
 Requires(preun): /sbin/chkconfig
 BuildRequires: glib2-devel popt-devel gettext pkgconfig
 
+Patch001: initscripts-9.03.58-flush-global-scope.patch
 Patch1000: centos-initscripts.patch
 
 %description
@@ -69,6 +70,7 @@ Currently, this consists of various memory checking code.
 
 %prep
 %setup -q
+%patch001 -p1
 %patch1000 -p1
 
 %build
@@ -251,8 +253,11 @@ rm -rf $RPM_BUILD_ROOT
 /etc/profile.d/debug*
 
 %changelog
-* Tue Jul 12 2016 Johnny Hughes <johnny@centos.org>  - 9.03.53-1.1
+* Fri Feb 24 2017 Johnny Hughes <johnny@centos.org> - 9.03.53-1.el6_8.2
 - Roll in CentOS Branding
+
+* Thu Feb 09 2017 David Kaspar [Dee'Kej] <dkaspar@redhat.com> - 9.03.53-1.el6_8.2
+- fix ifdown with 'lo' (loopback) alias (bug #1420053)
 
 * Mon Jun 13 2016 Lukáš Nykrýn <lnykryn@redhat.com> - 9.03.53-1.1
 - spec: we need newer lvm

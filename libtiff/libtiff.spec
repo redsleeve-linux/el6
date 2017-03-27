@@ -1,7 +1,7 @@
 Summary: Library of functions for manipulating TIFF format image files
 Name: libtiff
 Version: 3.9.4
-Release: 18%{?dist}
+Release: 21%{?dist}
 
 License: libtiff
 Group: System Environment/Libraries
@@ -51,6 +51,10 @@ Patch40: libtiff-CVE-2016-3945.patch
 Patch41: libtiff-CVE-2016-3990.patch
 Patch42: libtiff-CVE-2016-3991.patch
 Patch43: libtiff-CVE-2016-5320.patch
+Patch44: libtiff-CVE-2016-9533_9534_9536_9537.patch
+Patch45: libtiff-CVE-2016-9535.patch
+Patch46: libtiff-CVE-2016-9540.patch
+Patch47: libtiff-CVE-2016-5652.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: zlib-devel libjpeg-devel
@@ -137,6 +141,10 @@ necessary for some boot packages.
 %patch41 -p1
 %patch42 -p1
 %patch43 -p1
+%patch44 -p1
+%patch45 -p1
+%patch46 -p1
+%patch47 -p1
 
 # Use build system's libtool.m4, not the one in the package.
 rm -f libtool.m4
@@ -245,6 +253,21 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/*.a
 
 %changelog
+* Fri Jan 20 2017 Nikola Forró <nforro@redhat.com> - 3.9.4-21
+- Fix patch for CVE-2016-5652
+- Related: #1412078
+
+* Wed Jan 18 2017 Nikola Forró <nforro@redhat.com> - 3.9.4-20
+- Fix CWE-476 defect found by covscan
+- Related: #1412078
+
+* Fri Jan 13 2017 Nikola Forró <nforro@redhat.com> - 3.9.4-19
+- Add patches for CVEs:
+- CVE-2016-9533 CVE-2016-9534 CVE-2016-9535
+- CVE-2016-9536 CVE-2016-9537 CVE-2016-9540
+- CVE-2016-5652
+- Resolves: #1412078
+
 * Wed Jul 20 2016 Nikola Forró <nforro@redhat.com> - 3.9.4-18
 - Update patch for CVE-2014-8127
 - Related: #1335099

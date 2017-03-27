@@ -7,10 +7,10 @@
 %define debug 0
 
 
-%define icedteaver 1.13.12
+%define icedteaver 1.13.13
 %define icedteasnapshot %{nil}
-%define openjdkver 40
-%define openjdkdate 22_aug_2016
+%define openjdkver 41
+%define openjdkdate 04_jan_2017
 
 %define genurl http://cvs.fedoraproject.org/viewcvs/devel/java-1.6.0-openjdk/
 
@@ -94,8 +94,7 @@
 %define bootstrapopt %{nil}
 %else
 %define stapopt %{nil}
-#%%define bootstrapopt --disable-bootstrap
-%define bootstrapopt %{nil}
+%define bootstrapopt --disable-bootstrap
 %endif
 
 # Convert an absolute path to a relative path.  Each symbolic link is
@@ -159,7 +158,7 @@
 
 Name:    java-%{javaver}-%{origin}
 Version: %{javaver}.%{buildver}
-Release: %{icedteaver}.6%{?dist}
+Release: %{icedteaver}.1%{?dist}
 # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons,
 # and this change was brought into RHEL-4.  java-1.5.0-ibm packages
 # also included the epoch in their virtual provides.  This created a
@@ -234,7 +233,7 @@ BuildRequires: redhat-lsb
 %if %{gcjbootstrap}
 BuildRequires: java-1.5.0-gcj-devel
 %else
-BuildRequires: java-1.6.0-openjdk-devel
+BuildRequires: java-1.6.0-openjdk-devel >= 1.6.0.40
 %endif
 # Java Access Bridge for GNOME build requirements.
 BuildRequires: at-spi-devel
@@ -386,7 +385,10 @@ export ARCH_DATA_MODEL=64
 export CFLAGS="$CFLAGS -mieee"
 %endif
 ./autogen.sh
-%configure %{icedteaopt} %{bootstrapopt} %{stapopt} --with-openjdk-src-zip=%{SOURCE1} \
+%configure %{bootstrapopt} --prefix=%{_jvmdir}/%{sdkdir} --exec-prefix=%{_jvmdir}/%{sdkdir} \
+  --bindir=%{_jvmdir}/%{sdkdir}/bin --includedir=%{_jvmdir}/%{sdkdir}/include \
+  --docdir=%{_defaultdocdir}/%{name} --mandir=%{_jvmdir}/%{sdkdir}/man \
+  --htmldir=%{_javadocdir}/%{name} %{icedteaopt} %{stapopt} --with-openjdk-src-zip=%{SOURCE1} \
   --with-pkgversion=rhel-%{release}-%{_arch} --enable-pulse-java \
   --with-abs-install-dir=%{_jvmdir}/%{sdkdir} \
   --with-rhino --with-parallel-jobs=$NUM_PROC --disable-lcms2 \
@@ -896,6 +898,27 @@ exit 0
 %doc %{_javadocdir}/%{name}
 
 %changelog
+* Wed Jan 04 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.41-1.13.13.1
+- Update to new 1.13.13 and b41 tarballs to correct TCK failure.
+- Resolves: rhbz#1381990
+
+* Tue Jan 03 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.41-1.13.13.0
+- Update to new 1.13.13 tarball with PR3275 and PR3276 fixes.
+- Resolves: rhbz#1381990
+
+* Tue Jan 03 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.41-1.13.13.0
+- Update to IcedTea 1.13.13 & OpenJDK 6 b41.
+- Fix context for rpath patch following PR3213.
+- Resolves: rhbz#1381990
+
+* Mon Sep 05 2016 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.41-1.13.13.0
+- Require a JDK with RH1334465/PR2956 fixed and turn off bootstrapping for Zero architectures.
+- Resolves: rhbz#1381990
+
+* Thu Sep 01 2016 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.41-1.13.13.0
+- Set install directories in configure so that @prefix@ is substituted correctly in tapset
+- Resolves: rhbz#1381990
+
 * Mon Aug 22 2016 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.6.0.40-1.13.12.6
 - Bump source tarballs to try and really fix TCK failures this time.
 - Resolves: rhbz#1350044

@@ -7,7 +7,7 @@
 Summary: Apache HTTP Server
 Name: httpd
 Version: 2.2.15
-Release: 54%{?dist}
+Release: 56%{?dist}.3
 URL: http://httpd.apache.org/
 Source0: http://www.apache.org/dist/httpd/httpd-%{version}.tar.gz
 Source1: centos_index.html
@@ -129,6 +129,10 @@ Patch139: httpd-2.2.15-r1124515.patch
 Patch140: httpd-2.2.15-dhparams-free.patch
 Patch141: httpd-2.2.15-r895483.patch
 Patch142: httpd-2.2.15-r1542379.patch
+Patch143: httpd-2.2.15-r1681289.patch
+Patch144: httpd-2.2.15-r1681694.patch
+Patch145: httpd-2.2.15-rotatelogs-zombie.patch
+
 # Security fixes
 Patch200: httpd-2.2.15-CVE-2010-1452.patch
 Patch201: httpd-2.2.15-CVE-2011-3192ver3.patch
@@ -330,6 +334,9 @@ Security (TLS) protocols.
 %patch140 -p1 -b .dhparams
 %patch141 -p1 -b .r895483
 %patch142 -p1 -b .r1542379
+%patch143 -p1 -b .r1681289
+%patch144 -p1 -b .r1681694
+%patch145 -p1 -b .zombie
 
 %patch200 -p1 -b .cve1452
 %patch201 -p1 -b .cve3192ver3
@@ -729,8 +736,19 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/httpd/build/*.sh
 
 %changelog
-* Mon Jul 18 2016 Johnny Hughes <johnny@centos.org> - 2.2.15-54
+* Wed Jan 11 2017 Johnny Hughes <johnny@centos.org> - 2.2.15-54.3
 - Roll in CentOS Branding
+
+* Tue Dec 13 2016 Luboš Uhliarik <luhliari@redhat.com> - 2.2.15-54.3
+- Resolves: #1403212 - rotatelogs: creation of zombie processes when -p is used
+
+* Thu Nov 03 2016 Luboš Uhliarik <luhliari@redhat.com> - 2.2.15-54.2
+- Resolves: #1391517 - when ProxyErrorOverride is On, modcluster
+  return 503 status code on subsequent requests
+
+* Fri Sep 09 2016 Luboš Uhliarik <luhliari@redhat.com> - 2.2.15-54.1
+- Resolves: #1374729 - ProxyRemote with HTTPS backend sends requests
+  with absoluteURI instead of abs_path
 
 * Tue Jul 12 2016 Joe Orton <jorton@redhat.com> - 2.2.15-54
 - add security fix for CVE-2016-5387

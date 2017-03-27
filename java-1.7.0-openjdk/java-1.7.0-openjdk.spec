@@ -1,7 +1,7 @@
 # If debug is 1, OpenJDK is built with all debug info present.
 %global debug 0
 
-%global icedtea_version 2.6.8
+%global icedtea_version 2.6.9
 %global hg_tag icedtea-{icedtea_version}
 
 %global accessmajorver 1.23
@@ -136,7 +136,7 @@
 
 # Standard JPackage naming and versioning defines.
 %global origin          openjdk
-%global updatever       121
+%global updatever       131
 %global buildver        00
 # Keep priority on 6digits in case updatever>9
 %global priority        170%{updatever}
@@ -188,7 +188,7 @@
 
 Name:    java-%{javaver}-%{origin}
 Version: %{javaver}.%{updatever}
-Release: %{icedtea_version}.1%{?dist}
+Release: %{icedtea_version}.0%{?dist}
 # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons,
 # and this change was brought into RHEL-4.  java-1.5.0-ibm packages
 # also included the epoch in their virtual provides.  This created a
@@ -1137,6 +1137,7 @@ exit 0
 %config(noreplace) %{_jvmdir}/%{jredir}/lib/security/local_policy.jar
 %config(noreplace) %{_jvmdir}/%{jredir}/lib/security/java.policy
 %config(noreplace) %{_jvmdir}/%{jredir}/lib/security/java.security
+%config(noreplace) %{_jvmdir}/%{jredir}/lib/security/blacklisted.certs
 %config(noreplace) %{_jvmdir}/%{jredir}/lib/logging.properties
 %{_datadir}/icons/hicolor/*x*/apps/java-%{javaver}.png
 %{_mandir}/man1/java-%{uniquesuffix}.1*
@@ -1229,6 +1230,16 @@ exit 0
 %doc %{buildoutputdir}/j2sdk-image/jre/LICENSE
 
 %changelog
+* Tue Feb 07 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.7.0.131-2.6.9.0
+- Add blacklisted.certs to installation file list.
+- Resolves: rhbz#1410612
+
+* Tue Feb 07 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.7.0.131-2.6.9.0
+- Bump to 2.6.9 and u131b00.
+- Remove patch application debris in fsg.sh.
+- Re-generate PR2809 and RH1022017 against 2.6.9.
+- Resolves: rhbz#1410612
+
 * Tue Nov 01 2016 Jiri Vanek <jvanek@redhat.com> - 1:1.7.0.121-2.6.8.1
 - New variable, @prefix@, needs to be substituted in tapsets (rhbz1371005)
 - Resolves: rhbz#1381990

@@ -1,7 +1,7 @@
 Summary:	A sophisticated file transfer program
 Name:		lftp
 Version:	4.0.9
-Release:	6%{?dist}.3
+Release:	6%{?dist}.4
 License:	GPLv3+
 Group:		Applications/Internet
 Source0:	ftp://ftp.yar.ru/lftp/lftp-%{version}.tar.lzma
@@ -33,6 +33,10 @@ Patch10:	lftp-4.0.9-follow-symlink-attrs.patch
 # BZ: https://bugzilla.redhat.com/show_bug.cgi?id=1228484
 # Fixed in: 4.7.3
 Patch11:	lftp-4.0.9-mirror_hang.patch
+# Commit: https://github.com/lavv17/lftp/commit/f2f2bb91e4ad9a4e8a6eb74b557bac04f505b872
+# BZ: https://bugzilla.redhat.com/show_bug.cgi?id=1371989
+# Fixed in: 4.4.10
+Patch12:        lftp-4.0.9-mirror-array-info-hang.patch
 
 %description
 LFTP is a sophisticated ftp/http file transfer program. Like bash, it has job
@@ -62,6 +66,7 @@ Utility scripts for use with lftp.
 %patch9 -p1 -b .follow_symlink
 %patch10 -p1 -b .follow_symlink_attrs
 %patch11 -p1 -b .mirror_hang
+%patch12 -p1 -b .mirror-array-info-hang
 
 #sed -i.rpath -e '/lftp_cv_openssl/s|-R.*lib||' configure
 sed -i.norpath -e \
@@ -124,7 +129,10 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
-* Tue Aug 30 2016 mruprich <mruprich@redhat.com> - 4.0.9-6.3
+* Wed Dec 14 2016 Michal Ruprich <mruprich@redhat.com> - 4.0.9-6.4
+- Resolves: #1404588 - lftp hangs after dowloading one file during a mirror
+
+* Tue Aug 30 2016 Michal Ruprich <mruprich@redhat.com> - 4.0.9-6.3
 - Resolves: #1371565 - lftp hangs after dowloading one file during a mirror
 
 * Tue Jun 28 2016 Luboš Uhliarik <luhliari@redhat.com> - 4.0.9-6.2

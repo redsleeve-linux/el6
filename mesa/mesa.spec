@@ -10,8 +10,8 @@
 # set this to 1 temporarily when doing llvm rebases, to avoid build loops
 %define llvm_rebase 0
 %define use_bundled_gcc         1
-%define gcc_version             4.8.5-4
-#4.8.5-4
+%define gcc_version             4.8.2-16
+
 # S390 doesn't have video cards, but we need swrast for xserver's GLX
 %ifarch s390 s390x
 %define with_hardware 0
@@ -19,7 +19,7 @@
 %else
 %define with_hardware 1
 %define base_drivers swrast,radeon,r200
-%ifarch %{ix86}
+%ifarch %{ix86} {arm}
 %define platform_drivers ,i915,i965
 %define with_vmware 1
 %endif
@@ -44,7 +44,7 @@
 Summary: Mesa graphics libraries
 Name: mesa
 Version: 11.0.7
-Release: 4%{?dist}
+Release: 4%{?dist}.0
 License: MIT
 Group: System Environment/Libraries
 URL: http://www.mesa3d.org
@@ -62,7 +62,7 @@ Source2: %{manpages}.tar.bz2
 Source3: make-git-snapshot.sh
 Source4: ftp://ftp.freedesktop.org/pub/mesa/glu/glu-9.0.0.tar.bz2
 Source5: http://www.x.org/pub/individual/app/%{xdriinfo}.tar.bz2
-Source300:      gcc-%{gcc_version}.el7.src.rpm
+Source300:      gcc48-%{gcc_version}.el6.src.rpm
 
 Patch1: mesa-8.1-osmesa-version.patch
 Patch10: mesa-demos-glew-hack.patch
@@ -86,6 +86,8 @@ Patch70: 0001-i965-gen9-Switch-thread-scratch-space-to-non-coheren.patch
 %ifarch %{arm}
 BuildRequires: libmpc-devel >= 0.8
 BuildRequires: gcc-java
+BuildRequires: libva
+BuildRequires: llvm-devel
 %endif
 %ifarch s390x
 %global multilib_32_arch s390
@@ -199,7 +201,7 @@ BuildRequires: pkgconfig autoconf automake libtool
 %if %{with_hardware}
 BuildRequires: kernel-headers >= 2.6.27-0.305.rc5.git6
 %endif
-BuildRequires: libdrm-devel >= 2.4.37
+BuildRequires: libdrm-devel >= 2.4.60
 BuildRequires: libXxf86vm-devel
 BuildRequires: expat-devel >= 2.0
 BuildRequires: xorg-x11-proto-devel >= 7.1-10
@@ -240,7 +242,7 @@ Provides: libGL
 Requires: mesa-dri-drivers%{?_isa} = %{version}-%{release}
 Requires: libX11 > 1.6
 %if %{with_hardware}
-Requires: libdrm >= 2.4.24-1
+Requires: libdrm >= 2.4.60
 Conflicts: xorg-x11-server-Xorg < 1.4.99.901-14
 %endif
 
@@ -427,7 +429,7 @@ GCC_PATH="%{_rpmdir}"
 rpmbuild --nodeps --rebuild %{SOURCE300}
 cd %{_rpmdir}
 if [ ! -f $GCC_PATH/$GCC_FILE ]; then
-    GCC_PATH="$GCC_PATH/%{_arch}"
+    GCC_PATH="$GCC_PATH/%{_target_cpu}"
 fi
 rpm2cpio $GCC_PATH/$GCC_FILE | cpio -iduv
 # Clean gcc48 rpms to avoid including them to package
@@ -446,7 +448,7 @@ autoreconf --install -f -v
 
 export CFLAGS="$RPM_OPT_FLAGS -fvisibility=hidden"
 export CXXFLAGS="$RPM_OPT_FLAGS -fvisibility=hidden"
-%ifarch %{ix86}
+%ifarch %{ix86} %{arm}
 # i do not have words for how much the assembly dispatch code infuriates me
 %define common_flags --enable-selinux --enable-pic --disable-asm
 %else
@@ -629,7 +631,7 @@ rm -rf $RPM_BUILD_ROOT
 %ifnarch ppc
 %{_libdir}/dri/radeonsi_dri.so
 %endif
-%ifarch %{ix86} x86_64 ia64
+%ifarch %{ix86} x86_64 ia64 %{arm}
 %{_libdir}/dri/i915_dri.so
 %ifnarch ia64
 %{_libdir}/dri/i965_dri.so
@@ -744,6 +746,9 @@ rm -rf $RPM_BUILD_ROOT
 %endif
 
 %changelog
+* Tue Dec 20 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 11.0.7-4.0
+- Added arm to vmware build
+
 * Tue Mar 08 2016 Adam Jackson <ajax@redhat.com> - 11.0.7-4
 - Updates for new skylake parts
 

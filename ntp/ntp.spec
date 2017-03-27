@@ -1,7 +1,7 @@
 Summary: The NTP daemon and utilities
 Name: ntp
 Version: 4.2.6p5
-Release: 10%{?dist}.1
+Release: 10%{?dist}.2
 # primary license (COPYRIGHT) : MIT
 # ElectricFence/ (not used) : GPLv2
 # kernel/sys/ppsclock.h (not used) : BSD with advertising
@@ -162,6 +162,16 @@ Patch61: ntp-4.2.6p5-cve-2016-1548.patch
 Patch62: ntp-4.2.6p5-cve-2016-2518.patch
 # ntpbz #2879
 Patch63: ntp-4.2.6p5-cve-2016-1550.patch
+# ntpbz #3071
+Patch64: ntp-4.2.6p5-cve-2016-7426.patch
+# ntpbz #3072
+Patch65: ntp-4.2.6p5-cve-2016-7429.patch
+# ntpbz #3067
+Patch66: ntp-4.2.6p5-cve-2016-7433.patch
+# ntpbz #3118
+Patch67: ntp-4.2.6p5-cve-2016-9310.patch
+# ntpbz #3119
+Patch68: ntp-4.2.6p5-cve-2016-9311.patch
 
 # handle unknown clock types
 Patch100: ntpstat-0.2-clksrc.patch
@@ -299,6 +309,11 @@ This package contains NTP documentation in HTML format.
 %patch61 -p1 -b .cve-2016-1548
 %patch62 -p1 -b .cve-2016-2518
 %patch63 -p1 -b .cve-2016-1550
+%patch64 -p1 -b .cve-2016-7426
+%patch65 -p1 -b .cve-2016-7429
+%patch66 -p1 -b .cve-2016-7433
+%patch67 -p1 -b .cve-2016-9310
+%patch68 -p1 -b .cve-2016-9311
 
 # ntpstat patches
 %patch100 -p1 -b .clksrc
@@ -492,8 +507,15 @@ fi
 %{ntpdocdir}/html
 
 %changelog
-* Tue May 31 2016 Johnny Hughes <johnny@centos.org> 4.2.6p5-10.el6_8.1
-- Roll in CentOS branding
+* Mon Feb  6 2017 Johnny Hughes <johnny@centos.org> 4.2.6p5-10.el6_8.2
+- Add CentOS Pool servers
+
+* Wed Jan 11 2017 Miroslav Lichvar <mlichvar@redhat.com> 4.2.6p5-10.el6_8.2
+- don't limit rate of packets from sources (CVE-2016-7426)
+- don't change interface from received packets (CVE-2016-7429)
+- fix calculation of root distance again (CVE-2016-7433)
+- require authentication for trap commands (CVE-2016-9310)
+- fix crash when reporting peer event to trappers (CVE-2016-9311)
 
 * Tue May 03 2016 Miroslav Lichvar <mlichvar@redhat.com> 4.2.6p5-10.el6_8.1
 - don't allow spoofed packets to demobilize associations (CVE-2015-7979,

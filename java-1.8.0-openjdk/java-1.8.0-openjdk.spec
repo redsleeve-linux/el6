@@ -46,7 +46,11 @@
 # is expected in one single case at the end of build
 %global rev_build_loop  %{build_loop2} %{build_loop1}
 
+%ifarch %{jit_arches}
+%global bootstrap_build 1
+%else
 %global bootstrap_build 0
+%endif
 
 %if %{bootstrap_build}
 %global targets bootcycle-images docs
@@ -152,7 +156,7 @@
 # note, following three variables are sedded from update_sources if used correctly. Hardcode them rather there.
 %global project         aarch64-port
 %global repo            jdk8u
-%global revision        aarch64-jdk8u111-b15
+%global revision        aarch64-jdk8u121-b13
 # eg # jdk8u60-b27 -> jdk8u60 or # aarch64-jdk8u60-b27 -> aarch64-jdk8u60  (dont forget spec escape % by %%)
 %global whole_update    %(VERSION=%{revision}; echo ${VERSION%%-*})
 # eg  jdk8u60 -> 60 or aarch64-jdk8u60 -> 60
@@ -610,7 +614,7 @@ Requires: fontconfig
 Requires: xorg-x11-fonts-Type1
 
 # RHEL 6 only builds on x86 and x86_64
-ExclusiveArch: x86_64 i686 %{arm}
+ExclusiveArch: x86_64 i686
 
 # Requires rest of java
 Requires: %{name}-headless%1 = %{epoch}:%{version}-%{release}
@@ -725,7 +729,7 @@ Requires: %{name}-headless%1 = %{epoch}:%{version}-%{release}
 
 Name:    java-%{javaver}-%{origin}
 Version: %{javaver}.%{updatever}
-Release: 0.%{buildver}%{?dist}.1
+Release: 0.%{buildver}%{?dist}
 # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons,
 # and this change was brought into RHEL-4.  java-1.5.0-ibm packages
 # also included the epoch in their virtual provides.  This created a
@@ -745,7 +749,7 @@ URL:      http://openjdk.java.net/
 
 # aarch64-port now contains integration forest of both aarch64 and normal jdk
 # Source from upstream OpenJDK8 project. To regenerate, use
-# VERSION=aarch64-jdk8u111-b15 FILE_NAME_ROOT=aarch64-port-jdk8u-${VERSION}
+# VERSION=aarch64-jdk8u121-b13 FILE_NAME_ROOT=aarch64-port-jdk8u-${VERSION}
 # REPO_ROOT=<path to checked-out repository> generate_source_tarball.sh
 # where the source is obtained from http://hg.openjdk.java.net/%%{project}/%%{repo}
 Source0: %{project}-%{repo}-%{revision}.tar.xz
@@ -836,20 +840,6 @@ Patch502: pr2462.patch
 # S6260348, PR3066: GTK+ L&F JTextComponent not respecting desktop caret blink rate
 Patch526: 6260348-pr3066.patch
 
-# Patches upstream and appearing in 8u111
-# S8159244, PR3074: Partially initialized string object created by C2's string concat optimization may escape
-Patch527: 8159244-pr3074.patch
-
-# Patches upstream and appearing in 8u112
-# S8044762, PR2960: com/sun/jdi/OptionTest.java test time out
-Patch521: 8044762-pr2960.patch
-# S8049226, PR2960: com/sun/jdi/OptionTest.java test times out again
-Patch522: 8049226-pr2960.patch
-# 8154210: Zero: Better byte behaviour
-Patch606: 8154210.patch
-# S8158260, PR2991, RH1341258: JVM on PPC64 LE crashes due to an illegal instruction in JITed code
-Patch524: 8158260-pr2991-rh1341258.patch
-
 # Patches ineligible for 8u
 # 8043805: Allow using a system-installed libjpeg
 Patch201: system-libjpeg.patch
@@ -861,6 +851,8 @@ Patch525: pr1834-rh1022017.patch
 Patch533: rh1367357.patch
 # Turn on AssumeMP by default on RHEL systems
 Patch534: always_assumemp.patch
+# RH1393047: Make java.io.ObjectInputStream compatible with pre-Java 8 compilers
+Patch535: rh1393047.patch
 
 # Non-OpenJDK fixes
 
@@ -892,10 +884,12 @@ BuildRequires: nss-devel
 BuildRequires: pkgconfig
 BuildRequires: xorg-x11-proto-devel
 BuildRequires: zip
-%if !%{bootstrap_build}
-BuildRequires: java-1.8.0-openjdk-devel
+# Use OpenJDK 7 where available (on RHEL) to avoid
+# having to use the rhel-7.x-java-unsafe-candidate hack
+%if 0%{?rhel}
+BuildRequires: java-1.7.0-openjdk-devel
 %else
-BuildRequires: java-devel >= 1.7.0
+BuildRequires: java-1.8.0-openjdk-devel
 %endif
 # Zero-assembler build requirement.
 %ifnarch %{jit_arches}
@@ -1107,13 +1101,11 @@ sh %{SOURCE12}
 %patch103
 
 # ppc64le fixes
-%patch524
 
 # RHEL 6 fix
 %patch998
 
 # Zero fixes.
-%patch606
 
 %patch603
 %patch601
@@ -1128,12 +1120,10 @@ sh %{SOURCE12}
 %patch515
 %patch516
 %patch517
-%patch521
-%patch522
 %patch525
 %patch526
-%patch527
 %patch533
+%patch535
 
 # RHEL-only patches
 %if 0%{?rhel}
@@ -1652,8 +1642,34 @@ done
 %endif
 
 %changelog
-* Sat Nov 12 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 1:1.8.0.111-0.b15.1
-- Disabled bootstrap build
+* Mon Jan 16 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.8.0.121-0.b13
+- Update to aarch64-jdk8u121-b13.
+- Update PR1834/RH1022017 fix to reduce curves reported by SSL to apply against u121.
+- Re-generate RH1393047 ObjectInputStream patch against u121.
+- Resolves: rhbz#1410612
+
+* Mon Jan 16 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.8.0.112-0.b16
+- Update to aarch64-jdk8u112-b16.
+- Drop upstreamed patches for 8044762, 8049226, 8154210, 8158260 and 8160122.
+- Re-generate size_t and key size (RH1163501) patches against u112.
+- Resolves: rhbz#1410612
+
+* Mon Jan 16 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.8.0.111-3.b14
+- Enable a full bootstrap on JIT archs to ensure stability.
+- Resolves: rhbz#1410612
+
+* Thu Jan 12 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.8.0.111-2.b18
+- Use java-1.7.0-openjdk to bootstrap on RHEL to allow us to use main build target
+- Resolves: rhbz#1410612
+
+* Mon Jan 09 2017 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.8.0.111-2.b18
+- Update to aarch64-jdk8u111-b18, synced with upstream u111, S8170873 and new AArch64 fixes
+- Replace our correct version of 8159244 with the amendment to the 8u version from 8160122.
+- Resolves: rhbz#1410612
+
+* Tue Nov 08 2016 Andrew Hughes <gnu.andrew@redhat.com> - 1:1.8.0.111-1.b15
+- Remove method reference from java.io.ObjectInputStream to allow compilation on old ECJ.
+- Resolves: rhbz#1393047
 
 * Mon Oct 10 2016 Jiri Vanek <jvanek@redhat.com> - 1:1.8.0.111-0.b15
 - added nss restricting requires

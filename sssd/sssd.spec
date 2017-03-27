@@ -26,7 +26,7 @@
 
 Name: sssd
 Version: 1.13.3
-Release: 22%{?dist}.4
+Release: 22%{?dist}.6
 Group: Applications/System
 Summary: System Security Services Daemon
 License: GPLv3+
@@ -105,6 +105,8 @@ Patch0067: 0067-AD-Do-not-schedule-the-machine-renewal-task-if-adcli.patch
 Patch0068: 0068-LDAP-Try-also-the-AD-access-control-for-IPA-users.patch
 Patch0069: 0069-AD-Do-not-leak-file-descriptors-during-machine-passw.patch
 Patch0070: 0070-Do-not-leak-fds-in-case-of-failures-setting-up-a-chi.patch
+Patch0071: 0071-GPO-ignore-non-KVP-lines-if-possible.patch
+Patch0072: 0072-gpo-gPCMachineExtensionNames-with-just-whitespaces.patch
 
 ### Dependencies ###
 Requires: sssd-common = %{version}-%{release}
@@ -138,7 +140,7 @@ BuildRequires: libtdb-devel
 BuildRequires: libldb-devel >= %{ldb_version}
 BuildRequires: libdhash-devel >= 0.4.2
 BuildRequires: libcollection-devel
-BuildRequires: libini_config-devel >= 1.1.0
+BuildRequires: libini_config-devel >= 1.1.0-11.el6_8.1
 BuildRequires: dbus-devel
 BuildRequires: dbus-libs
 BuildRequires: openldap-devel
@@ -192,7 +194,7 @@ Requires: libldb%{?_isa} >= %{ldb_version}
 Requires: libtdb%{?_isa} >= 1.1.3
 Requires: sssd-client%{?_isa} = %{version}-%{release}
 Requires: libsss_idmap%{?_isa} = %{version}-%{release}
-Requires: libini_config >= 0.6.1
+Requires: libini_config >= 1.1.0-11.el6_8.1
 Requires(post): initscripts chkconfig
 Requires(preun): initscripts chkconfig
 Requires(postun): initscripts chkconfig
@@ -882,6 +884,13 @@ fi
 %postun -n libsss_idmap -p /sbin/ldconfig
 
 %changelog
+* Thu Dec  1 2016 Jakub Hrozek <jhrozek@redhat.com> - 1.13.3-22.6
+- Explicitly Require the matching version of ding-libs
+- Related: rhbz#1379580 - SSSD fails to process GPO from Active Directory.
+
+* Tue Sep 27 2016 Jakub Hrozek <jhrozek@redhat.com> - 1.13.3-22.5
+- Resolves: rhbz#1379580 - SSSD fails to process GPO from Active Directory.
+
 * Tue Jun 21 2016 Jakub Hrozek <jhrozek@redhat.com> - 1.13.3-22.4
 - Resolves: rhbz#1348538 - sssd-common requires libnfsidmap
 

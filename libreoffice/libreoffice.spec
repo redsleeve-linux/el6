@@ -1658,7 +1658,6 @@ rm -f \
 
 %check
 # test on slow arm takes too long. We trust it works
-%ifnarch %{arm}
 ulimit -c unlimited
 unset WITH_LANG
 # work around flawed accessibility check
@@ -1671,7 +1670,6 @@ timeout -k 5m 3h make smoketest.subsequentcheck
 %endif
 # we don't need this anymore
 rm -f %{buildroot}%{baseinstdir}/program/classes/smoketest.jar
-%endif # arm
 
 %files
 

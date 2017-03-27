@@ -2,7 +2,7 @@
 Summary: A collection of basic system utilities
 Name: util-linux-ng
 Version: 2.17.2
-Release: 12.24%{?dist}.0
+Release: 12.24%{?dist}.3
 License: GPLv1+ and GPLv2 and GPLv2+ and LGPLv2+ and MIT and BSD with advertising and Public Domain
 Group: System Environment/Base
 URL: ftp://ftp.kernel.org/pub/linux/utils/util-linux-ng
@@ -373,8 +373,10 @@ Patch120: util-linux-ng-2.17-fdisk-reorder.patch
 # 1316864 ipcmk fails with "Invalid argument" while creating a shared memory of size 2 GiB
 Patch121: util-linux-ng-2.17-ipcmk-size.patch
 
-# RSEL6.8
-Patch10000: util-linux-ng-2.17-setns.patch
+## RHEL6.8.Z
+# RHEL6.8 check for 642 kernel without specify dependence in spec file
+Patch122: 0122-lib-linux_version-add-code-to-get-kernel-release.patch
+Patch123: 0123-login-check-kernel-version-for-proper-vhangup.patch
 
 %description
 The util-linux-ng package contains a large variety of low-level system
@@ -586,9 +588,8 @@ cp %{SOURCE8} %{SOURCE9} .
 %patch119 -p1
 %patch120 -p1
 %patch121 -p1
-%ifarch %{arm}
-%patch10000 -p1
-%endif
+%patch122 -p1
+%patch123 -p1
 
 %build
 unset LINGUAS || :
@@ -599,9 +600,6 @@ unset LINGUAS || :
 export CFLAGS="-D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 $RPM_OPT_FLAGS"
 export SUID_CFLAGS="-fpie"
 export SUID_LDFLAGS="-pie"
-%ifarch %{arm}
-export LDFLAGS="${LDFLAGS} -ltinfo"
-%endif
 %configure \
 	--bindir=/bin \
 	--sbindir=/sbin \
@@ -1143,8 +1141,14 @@ fi
 
 
 %changelog
-* Thu Sep 29 2016 Bjarne Saltbaek <bjarne@redsleeve.org> 2.17.2-12.24.0
-- Patch for building on arm. setns() backported
+* Thu Jan 19 2017 Karel Zak <kzak@redhat.com> 2.17.2-12.24.el6_8.3
+- update spec file
+
+* Thu Jan 19 2017 Karel Zak <kzak@redhat.com> 2.17.2-12.24.el6_8.2
+- fix #1413664 - RHEL6.8 check for 642 kernel without specify dependence in spec file
+
+* Wed Oct 12 2016 Karel Zak <kzak@redhat.com> 2.17.2-12.24.el6_8.1
+- fix #1349192 - RHEL6.8 util-linux-ng requires 642 kernel, but does not specify it as a dependency
 
 * Tue Mar 15 2016 Karel Zak <kzak@redhat.com> 2.17.2-12.24
 - fix #1316864 - ipcmk fails with "Invalid argument" while creating a shared memory of size 2 GiB

@@ -1,3 +1,4 @@
+%global _default_patch_fuzz        20
 %define DATE 20060404
 %define _unpackaged_files_terminate_build 0
 %define multilib_64_archs sparc64 ppc64 s390x x86_64
@@ -117,7 +118,10 @@ Patch100: gcc34-ldbl-hack.patch
 Patch101: gcc34-makeinfo.patch
 Patch102: gcc34-bison4.patch
 
-Patch1000: gcc-3.4.6-20060404-eabi.patch
+#Patch1000: gcc-3.4.6-20060404-eabi.patch
+Patch10001: 800-arm-bigendian.patch
+Patch10002: arm-softfloat.patch.conditional
+Patch10003: gcc-3.4.6-20060404-ld-linux.so.3.patch
 
 %define _gnu %{nil}
 %ifarch sparc sparcv9
@@ -238,7 +242,10 @@ Fortran 77 dynamically linked programs.
 %patch101 -p0 -b .makeinfo~
 %patch102 -p0 -b .bison4
 
-%patch1000 -p0 -b .armeabi
+#%patch1000 -p0 -b .armeabi
+%patch10001 -p1 -b .bigendian
+%patch10002 -p1 -b .arm-softfloat
+%patch10003 -p0 -b .ld
 
 perl -pi -e 's/3\.4\.7/3.4.6/' gcc/version.c
 perl -pi -e 's/"%{version}"/"%{version} \(release\)"/' gcc/version.c
@@ -324,7 +331,8 @@ CC="$CC" CFLAGS="$OPT_FLAGS" CXXFLAGS="$OPT_FLAGS" XCFLAGS="$OPT_FLAGS" TCFLAGS=
 	--host=%{gcc_target_platform} --build=%{gcc_target_platform} --target=%{gcc_target_platform} --with-cpu=v7
 %endif
 %ifarch %{arm}
-	--host=arm-linux-gnueabi --build=arm-linux-gnueabi --target=arm-linux-gnueabi
+        --without-fp --with-softfloat-support=internal --with-newlib --with-inhibit-libc --with-float=soft \
+	--host=arm-linux-gnueabi --build=arm-linux-gnueabi --target=arm-unknown-linux-gnueabi
 %endif
 %ifarch ppc
 	--host=%{gcc_target_platform} --build=%{gcc_target_platform} --target=%{gcc_target_platform} --with-cpu=default32

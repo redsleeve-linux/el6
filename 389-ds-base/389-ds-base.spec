@@ -22,7 +22,7 @@
 Summary:          389 Directory Server (base)
 Name:             389-ds-base
 Version:          1.2.11.15
-Release:          %{?relprefix}75%{?prerel}%{?dist}
+Release:          %{?relprefix}85%{?prerel}%{?dist}
 License:          GPLv2 with exceptions
 URL:              http://port389.org/
 Group:            System Environment/Daemons
@@ -56,6 +56,11 @@ BuildRequires:    openssl-devel
 BuildRequires:    tcp_wrappers
 # the following is for the pam passthru auth plug-in
 BuildRequires:    pam-devel
+
+# Needed to support regeneration of the autotool artifacts.
+BuildRequires:    autoconf
+BuildRequires:    automake
+BuildRequires:    libtool
 
 # this is needed for using semanage from our setup scripts
 Requires:         policycoreutils-python
@@ -482,6 +487,24 @@ Patch379:         0379-Ticket-48420-change-severity-of-some-messages-relate.patc
 Patch380:         0380-Ticket-48808-Paged-results-search-returns-the-blank-.patch
 Patch381:         0381-Ticket-48813-password-history-is-not-updated-when-an.patch
 Patch382:         0382-Ticket-48854-Running-db2index-with-no-options-breaks.patch
+Patch383:         0383-Ticket-48636-Improve-replication-convergence.patch
+Patch384:         0384-Ticket-48636-Fix-config-validation-check.patch
+Patch385:         0385-Ticket-48636-Fix-cherry-pick-errors.patch
+Patch386:         0386-Ticket-48766-Replication-changelog-can-incorrectly-s.patch
+Patch387:         0387-Ticket-48636-Fix-backporting-errors.patch
+Patch388:         0388-Ticket-48954-replication-fails-because-anchorcsn-can.patch
+Patch389:         0389-Ticket-48354-Review-of-default-ACI-in-the-directory-.patch
+Patch390:         0390-Ticket-bz1358565-clear-and-unsalted-password-types-a.patch
+Patch391:         0391-Subject-PATCH-Bug-1358559-CVE-2016-4992-389-ds-base-.patch
+Patch392:         0392-Ticket-47462-Add-AES-plugin-to-replace-DES-plugin.patch
+Patch393:         0393-Bug-1354331-use-a-consumer-maxcsn-only-as-anchor-if-.patch
+Patch394:         0394-Ticket-47858-Internal-searches-using-OP_FLAG_REVERSE.patch
+Patch395:         0395-Ticket-48944-backport-1.2.11-on-a-read-only-replica-.patch
+Patch396:         0396-Ticket-48960-Crash-in-import_wait_for_space_in_fifo.patch
+Patch397:         0397-Ticket-47462-Add-AES-plugin-to-replace-DES-plugin.patch
+Patch398:         0398-Ticket-49011-Remove-configure-artifacts.patch
+Patch399:         0399-Ticket-47462-Add-AES-plugin-to-replace-DES-plugin.patch
+Patch400:         0400-Ticket-47411-Replace-substring-search-with-plain-sea.patch
 
 %description
 389 Directory Server is an LDAPv3 compliant server.  The base package includes
@@ -911,12 +934,34 @@ cp %{SOURCE1} README.devel
 %patch380 -p1
 %patch381 -p1
 %patch382 -p1
+%patch383 -p1
+%patch384 -p1
+%patch385 -p1
+%patch386 -p1
+%patch387 -p1
+%patch388 -p1
+%patch389 -p1
+%patch390 -p1
+%patch391 -p1
+%patch392 -p1
+%patch393 -p1
+%patch394 -p1
+%patch395 -p1
+%patch396 -p1
+%patch397 -p1
+%patch398 -p1
+%patch399 -p1
+%patch400 -p1
 
 %build
 %if %{use_openldap}
 OPENLDAP_FLAG="--with-openldap"
 %endif
 %{?with_tmpfiles_d: TMPFILES_FLAG="--with-tmpfiles-d=%{with_tmpfiles_d}"}
+
+# Rebuild the autotool artifacts now.
+autoreconf -fiv
+
 %configure --enable-autobind --with-selinux $OPENLDAP_FLAG $TMPFILES_FLAG
 
 # Generate symbolic info for debuggers
@@ -1048,6 +1093,53 @@ fi
 %{_libdir}/%{pkgname}/libslapd.so.*
 
 %changelog
+* Mon Nov 14 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-85
+- Release 1.2.11.15-85
+- Resolves: #1393007 - ds9 backport 47411 - Replace substring search with plain search in referint plugin (DS 47411)
+
+* Mon Nov  7 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-84
+- Release 1.2.11.15-84
+- Resolves: #1376676 - Backport AES storage scheme plugin (DS 47462)
+
+* Fri Oct 28 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-83
+- Release 1.2.11.15-83
+- Resolves: #1376676 - Backport AES storage scheme plugin (DS 47462)
+
+* Thu Oct 27 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-82
+- Release 1.2.11.15-82
+- Resolves: #1376676 - Backport AES storage scheme plugin (DS 47462)
+
+* Wed Oct  5 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-81
+- Release 1.2.11.15-81
+- Resolves: #Bug 1381153 - Crash in import_wait_for_space_in_fifo(). (DS 48960)
+
+* Thu Sep 29 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-80
+- Release 1.2.11.15-80
+- Resolves: #1379599 - ns-slapd general protection ip:7f570c56afd5 sp:7f56dc7edce0 error:0 in libc-2.12.so (DS 48944)
+
+* Wed Sep 21 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-79
+- Release 1.2.11.15-79
+- Resolves: #1358559 - CVE-2016-4992 389-ds-base: Information disclosure via repeated use of LDAP ADD operation
+- Resolves: #1376676 - Backport AES storage scheme plugin (DS 47462, 48862, 48243, 48777)
+- Resolves: #1354331 - Replication changelog can incorrectly skip over updates
+- Resolves: #1374588 - EASY FIX : dereferencing a NULL sr_candidates pointer in ldbm_back_next_search_entry_ext resulted a segfault (DS 47858)
+
+* Thu Aug 25 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-78
+- Release 1.2.11.15-78
+- Resolves: #1354331 -  Replication changelog can incorrectly skip over updates (DS 48954)
+- Resolves: #1361421 - CVE-2016-5416 389-ds-base: ACI readable by anonymous user (DS 48354)
+- Resolves: #1360974 - CVE-2016-5405 389-ds-base: Password verification vulnerable to timing attack
+
+* Wed Jul 27 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-77
+- Release 1.2.11.15-77
+- Resolves: #1358390 - replication delay when server is configured with multiple replication agreements. (DS 48636)
+                       fixing a backport error
+
+* Wed Jul 20 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-76
+- Release 1.2.11.15-76
+- Resolves: #1354331 - Replication changelog can incorrectly skip over updates (DS 48766)
+- Resolves: #1358390 - replication delay when server is configured with multiple replication agreements. (DS 48636)
+
 * Fri Jun  3 2016 Noriko Hosoi <nhosoi@redhat.com> - 1.2.11.15-75
 - Release 1.2.11.15-75
 - Resolves: #1335108 - Paged results search returns the blank list of entries (DS 48808)

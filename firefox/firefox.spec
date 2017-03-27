@@ -28,7 +28,6 @@
 # SHOULD ALWAYS BE 0 WHEN BUILDING IN BREW
 %define do_not_clean_rpms       0
 
-
 # Configure and override build options for various platforms and RHEL versions
 # ============================================================================
 
@@ -88,8 +87,8 @@ ExcludeArch: ppc ia64
 
 Summary:        Mozilla Firefox Web browser
 Name:           firefox
-Version:        45.4.0
-Release:        1%{?dist}.0
+Version:        45.8.0
+Release:        2%{?dist}
 URL:            http://www.mozilla.org/projects/firefox/
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
 Group:          Applications/Internet
@@ -100,10 +99,10 @@ Group:          Applications/Internet
 # From ftp://archive.mozilla.org/pub/firefox/releases/%{version}%{?ext_version}/source
 Source0:        firefox-%{version}%{?ext_version}.source.tar.xz
 %if %{build_langpacks}
-Source1:        firefox-langpacks-%{version}%{?ext_version}-20160907.tar.xz
+Source1:        firefox-langpacks-%{version}%{?ext_version}-20170306.tar.xz
 %endif
 Source10:       firefox-mozconfig
-Source12:       firefox-redsleeve-default-prefs.js
+Source12:       firefox-centos-default-prefs.js
 Source20:       firefox.desktop
 Source500:      firefox.sh.in.rhel5
 Source600:      firefox.sh.in.rhel6
@@ -116,7 +115,7 @@ Source300:      gcc48-%{gcc_version}.el5.src.rpm
 Source301:      yasm-1.2.0-3.el5.src.rpm
 Source302:      devtoolset-2-binutils-2.23.52.0.1-10.el5.src.rpm
 # RHEL5 bookmarks
-Source501:       firefox-redsleeve-default-bookmarks.html
+Source501:       firefox-centos-default-bookmarks.html
 
 # Build patches
 Patch0:         firefox-install-dir.patch
@@ -141,6 +140,7 @@ Patch201:       mozilla-1005535.patch
 # Kaie's patch, we'll most likely need this one
 Patch202:       mozilla-1152515.patch
 Patch203:       mozilla-1270046.patch
+# Laszlo Ersek patch for avoid obscure crashing on aarch64
 
 # RHEL7 patches
 Patch300:       mozilla-975832.patch
@@ -156,10 +156,6 @@ Patch506:       build-el5-fontconfig.patch
 Patch507:       build-el5-stdint.patch
 Patch508:       build-el5-nss.patch
 Patch509:       rhbz-1150082.patch
-
-# RSEL6 patches
-# RSEL6 is shipped with 2.6.32 kernel headers without latest hwcap defines
-Patch10001:     firefox-45.4.0esr-arm-hwcap.patch
 
 # ---------------------------------------------------
 BuildRoot:      %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
@@ -438,10 +434,6 @@ cd %{tarballdir}
 %patch509 -p1 -b .rhbz-1150082
 %endif
 
-%ifarch %{arm}
-%patch10001 -p0 -b .arm-hwcap
-%endif
-
 %{__rm} -f .mozconfig
 %{__cp} %{SOURCE10} .mozconfig
 %{__cp} %{SOURCE24} mozilla-api-key
@@ -534,9 +526,6 @@ function add_to_mozconfig() {
  add_to_mozconfig "enable-optimize"
 %endif
 
-#Disabled due to rhbz#1330898
-add_to_mozconfig "disable-ffmpeg"
-
 #FIXME RTTI?? RHEL5/6
 # ac_add_options --enable-cpp-rtti
 # RHEL7: ac_add_options --with-system-bz2
@@ -565,11 +554,6 @@ function build_bundled_package() {
     if ls $PACKAGE_DIR/%{_arch}/$PACKAGE_RPM; then
       PACKAGE_ALREADY_BUILD=1
     fi
-    %ifarch %{arm}
-    if ls $PACKAGE_DIR/%{_host_cpu}/$PACKAGE_RPM; then
-      PACKAGE_ALREADY_BUILD=1
-    fi
-    %endif
   %endif
   if [ $PACKAGE_ALREADY_BUILD == 0 ]; then
     echo "Rebuilding $PACKAGE_RPM from $PACKAGE_SOURCE"; echo "==============================="
@@ -581,9 +565,6 @@ function build_bundled_package() {
     ARCH_STR=%{_arch}
     %ifarch i386 i686
     ARCH_STR="i?86"
-    %endif
-    %ifarch %{arm}
-    ARCH_STR=%{_host_cpu}
     %endif
     PACKAGE_DIR="$PACKAGE_DIR/$ARCH_STR"
   fi
@@ -677,13 +658,9 @@ MOZ_OPT_FLAGS=$(echo "$MOZ_OPT_FLAGS" | %{__sed} -e 's/-g/-g1/')
 %endif
 
 # Avoid failing builds because OOM killer on some arches
-%ifarch s390 ppc
+%ifarch s390 %{arm} ppc
 MOZ_LINK_FLAGS="$MOZ_LINK_FLAGS -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 %endif
-%ifarch %{arm}
-MOZ_LINK_FLAGS="$MOZ_LINK_FLAGS -Wl,--no-keep-memory"
-%endif
-
 
 %if %{rhel} == 6
   %if %{system_libatomic}
@@ -961,27 +938,52 @@ gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 %exclude %{_datadir}/idl/*
 %exclude %{_includedir}/*
 %exclude %{_libdir}/%{name}-devel-*/*
-
 %if !%{?system_nss}
 %{mozappdir}/libfreebl3.chk
 %{mozappdir}/libnssdbm3.chk
 %{mozappdir}/libsoftokn3.chk
 %endif
+# Needed for ffmpeg
+%{mozappdir}/gmp-clearkey/*
 
 #---------------------------------------------------------------------
 
 %changelog
-* Sat Sep 24 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 45.4.0-1.0
-- Patched for RedSleeve EL6 armv5tel
+* Wed Mar  8 2017 Johnny Hughes <johnny@centos.org> - 45.8.0-2
+- Roll in CentOS Branding
 
-* Wed Sep 21 2016 CentOS Sources <bugs@centos.org> - 45.4.0-1.el7.centos
-- CentOS default prefs
- 
+* Mon Mar  6 2017 Jan Horak <jhorak@redhat.com> - 45.8.0-2
+- Update to 45.8.0 ESR (B2)
+
+* Thu Mar  2 2017 Jan Horak <jhorak@redhat.com> - 45.8.0-1
+- Update to 45.8.0 ESR
+
+* Fri Feb 3 2017 Martin Stransky <stransky@redhat.com> - 45.7.0-2
+- Enabled ppc/s390 arches (rhbz#1418765)
+
+* Thu Jan 19 2017 Martin Stransky <stransky@redhat.com> - 45.7.0-1
+- Updated to 45.7.0 (B1)
+
+* Wed Jan 11 2017 Martin Stransky <stransky@redhat.com> - 45.6.0-2
+- Enabled ffmpeg > 54.35.1 (rhbz#1330898, mozbz#1263665)
+
+* Sun Dec 11 2016 Jan Horak <jhorak@redhat.com> - 45.6.0-1
+- Update to 45.6.0 ESR
+
+* Wed Nov 30 2016 Jan Horak <jhorak@redhat.com> - 45.5.1-1
+- Update to 45.5.1 ESR
+
+* Tue Nov  8 2016 Jan Horak <jhorak@redhat.com> - 45.5.0-1
+- Update to 45.5.0 ESR
+
+* Mon Oct 31 2016 Jan Horak <jhorak@redhat.com> - 45.4.0-3
+- Added upcoming upstream patches mozbz#1018486
+
+* Mon Sep 26 2016 Jan Horak <jhorak@redhat.com> - 45.4.0-2
+- Added Laszlo Ersek patch for aarch64 crashes
+
 * Wed Sep  7 2016 Jan Horak <jhorak@redhat.com> - 45.4.0-1
 - Update to 45.4.0 ESR
-
-* Wed Aug 03 2016 CentOS Sources <bugs@centos.org> - 45.3.0-1.el7.centos
-- CentOS default prefs
 
 * Wed Jul 27 2016 Jan Horak <jhorak@redhat.com> - 45.3.0-1
 - Update to 45.3.0 ESR

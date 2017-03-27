@@ -25,9 +25,9 @@
 %endif
 
 %if %{with guest_agent}
-%define build_arches i686 x86_64 ppc64 %{arm}
+%define build_arches i686 x86_64 ppc64
 %else
-%define build_arches x86_64 %{arm}
+%define build_arches x86_64
 %endif
 
 %ifarch i686
@@ -49,10 +49,6 @@
 %global have_gluster     0
 %global have_spice       0
 %global kvm_target       ppc64
-%endif
-
-%ifarch %{arm}
-%global kvm_target    arm
 %endif
 
 %if 0%{?build_qemu_kvm}
@@ -110,7 +106,7 @@
 
 %define buildid %{nil}
 
-%define zrelease 3
+%define zrelease 7
 %define sublevel 0.12.1.2
 %define pkgrelease 2.491
 
@@ -153,7 +149,7 @@ Summary: Userspace component of KVM
 %endif
 Name: %{pkgname}
 Version: %{rpmversion}
-Release: %{full_release}.0
+Release: %{full_release}
 # Epoch because we pushed a qemu-1.0 package
 Epoch: 2
 License: GPLv2+ and LGPLv2+ and BSD
@@ -9040,6 +9036,53 @@ Patch5205: kvm-vga-make-sure-vga-register-setup-for-vbe-stays-intac.patch
 Patch5206: kvm-vga-add-sr_vbe-register-set.patch
 # For bz#1359724 - EMBARGOED CVE-2016-5403 qemu-kvm: Qemu: virtio: unbounded memory allocation on host via guest leading to DoS [rhel-6.8.z]
 Patch5207: kvm-virtio-error-out-if-guest-exceeds-virtqueue-size.patch
+# For bz#1408389 - [RHEL6.8.z] KVM guest shuts itself down after 128th reboot
+Patch5208: kvm-virtio-introduce-virtqueue_unmap_sg.patch
+# For bz#1408389 - [RHEL6.8.z] KVM guest shuts itself down after 128th reboot
+Patch5209: kvm-virtio-introduce-virtqueue_discard.patch
+# For bz#1408389 - [RHEL6.8.z] KVM guest shuts itself down after 128th reboot
+Patch5210: kvm-virtio-decrement-vq-inuse-in-virtqueue_discard.patch
+# For bz#1408389 - [RHEL6.8.z] KVM guest shuts itself down after 128th reboot
+Patch5211: kvm-balloon-fix-segfault-and-harden-the-stats-queue.patch
+# For bz#1408389 - [RHEL6.8.z] KVM guest shuts itself down after 128th reboot
+Patch5212: kvm-virtio-balloon-discard-virtqueue-element-on-reset.patch
+# For bz#1408389 - [RHEL6.8.z] KVM guest shuts itself down after 128th reboot
+Patch5213: kvm-virtio-zero-vq-inuse-in-virtio_reset.patch
+# For bz#1398213 - CVE-2016-2857 qemu-kvm: Qemu: net: out of bounds read in net_checksum_calculate() [rhel-6.8.z]
+Patch5214: kvm-net-check-packet-payload-length.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5215: kvm-cirrus_vga-fix-division-by-0-for-color-expansion-rop.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5216: kvm-cirrus_vga-fix-off-by-one-in-blit_region_is_unsafe.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5217: kvm-display-cirrus-check-vga-bits-per-pixel-bpp-value.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5218: kvm-display-cirrus-ignore-source-pitch-value-as-needed-i.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5219: kvm-cirrus-handle-negative-pitch-in-cirrus_invalidate_re.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5220: kvm-cirrus-allow-zero-source-pitch-in-pattern-fill-rops.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5221: kvm-cirrus-fix-blit-address-mask-handling.patch
+# For bz#1418230 - CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+# For bz#1419416 - CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z]
+Patch5222: kvm-cirrus-fix-oob-access-issue-CVE-2017-2615.patch
+# For bz#1420486 - EMBARGOED CVE-2017-2620 qemu-kvm: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z]
+# For bz#1420488 - EMBARGOED CVE-2017-2620 qemu-kvm-rhev: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z]
+Patch5223: kvm-cirrus-fix-patterncopy-checks.patch
+# For bz#1420486 - EMBARGOED CVE-2017-2620 qemu-kvm: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z]
+# For bz#1420488 - EMBARGOED CVE-2017-2620 qemu-kvm-rhev: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z]
+Patch5224: kvm-Revert-cirrus-allow-zero-source-pitch-in-pattern-fil.patch
+# For bz#1420486 - EMBARGOED CVE-2017-2620 qemu-kvm: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z]
+# For bz#1420488 - EMBARGOED CVE-2017-2620 qemu-kvm-rhev: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z]
+Patch5225: kvm-cirrus-add-blit_is_unsafe-call-to-cirrus_bitblt_cput.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires: SDL-devel zlib-devel which texi2html gnutls-devel cyrus-sasl-devel
@@ -13401,6 +13444,24 @@ MakeIOtestsExecutable()
 %patch5205 -p1
 %patch5206 -p1
 %patch5207 -p1
+%patch5208 -p1
+%patch5209 -p1
+%patch5210 -p1
+%patch5211 -p1
+%patch5212 -p1
+%patch5213 -p1
+%patch5214 -p1
+%patch5215 -p1
+%patch5216 -p1
+%patch5217 -p1
+%patch5218 -p1
+%patch5219 -p1
+%patch5220 -p1
+%patch5221 -p1
+%patch5222 -p1
+%patch5223 -p1
+%patch5224 -p1
+%patch5225 -p1
 
 ApplyOptionalPatch qemu-kvm-test.patch
 
@@ -13787,8 +13848,43 @@ fi
 %endif # with qemu_kvm
 
 %changelog
-* Sun Oct 02 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 0.12.1.2-2.491.el6_8.3.0
-- Added patch for building on %{arm}
+* Mon Feb 13 2017 Danilo Cesar Lemes de Paula <ddepaula@redhat.com> - 0.12.1.2-2.491.el6_8.7
+- kvm-cirrus-fix-patterncopy-checks.patch [bz#1420486 bz#1420488]
+- kvm-Revert-cirrus-allow-zero-source-pitch-in-pattern-fil.patch [bz#1420486 bz#1420488]
+- kvm-cirrus-add-blit_is_unsafe-call-to-cirrus_bitblt_cput.patch [bz#1420486 bz#1420488]
+- Resolves: bz#1420486
+  (EMBARGOED CVE-2017-2620 qemu-kvm: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z])
+- Resolves: bz#1420488
+  (EMBARGOED CVE-2017-2620 qemu-kvm-rhev: Qemu: display: cirrus: potential arbitrary code execution via cirrus_bitblt_cputovideo [rhel-6.8.z])
+
+* Thu Feb 09 2017 Danilo Cesar Lemes de Paula <ddepaula@redhat.com> - 0.12.1.2-2.491.el6_8.6
+- kvm-cirrus_vga-fix-division-by-0-for-color-expansion-rop.patch [bz#1418230 bz#1419416]
+- kvm-cirrus_vga-fix-off-by-one-in-blit_region_is_unsafe.patch [bz#1418230 bz#1419416]
+- kvm-display-cirrus-check-vga-bits-per-pixel-bpp-value.patch [bz#1418230 bz#1419416]
+- kvm-display-cirrus-ignore-source-pitch-value-as-needed-i.patch [bz#1418230 bz#1419416]
+- kvm-cirrus-handle-negative-pitch-in-cirrus_invalidate_re.patch [bz#1418230 bz#1419416]
+- kvm-cirrus-allow-zero-source-pitch-in-pattern-fill-rops.patch [bz#1418230 bz#1419416]
+- kvm-cirrus-fix-blit-address-mask-handling.patch [bz#1418230 bz#1419416]
+- kvm-cirrus-fix-oob-access-issue-CVE-2017-2615.patch [bz#1418230 bz#1419416]
+- Resolves: bz#1418230
+  (CVE-2017-2615 qemu-kvm: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z])
+- Resolves: bz#1419416
+  (CVE-2017-2615 qemu-kvm-rhev: Qemu: display: cirrus: oob access while doing bitblt copy backward mode [rhel-6.8.z])
+
+* Tue Jan 17 2017 Danilo Cesar Lemes de Paula <ddepaula@redhat.com> - 0.12.1.2-2.491.el6_8.5
+- kvm-net-check-packet-payload-length.patch [bz#1398213]
+- Resolves: bz#1398213
+  (CVE-2016-2857 qemu-kvm: Qemu: net: out of bounds read in net_checksum_calculate() [rhel-6.8.z])
+
+* Mon Jan 09 2017 Yash Mankad <ymankad@redhat.com> - 0.12.1.2-2.491.el6.4
+- kvm-virtio-introduce-virtqueue_unmap_sg.patch [bz#1408389]
+- kvm-virtio-introduce-virtqueue_discard.patch [bz#1408389]
+- kvm-virtio-decrement-vq-inuse-in-virtqueue_discard.patch [bz#1408389]
+- kvm-balloon-fix-segfault-and-harden-the-stats-queue.patch [bz#1408389]
+- kvm-virtio-balloon-discard-virtqueue-element-on-reset.patch [bz#1408389]
+- kvm-virtio-zero-vq-inuse-in-virtio_reset.patch [bz#1408389]
+- Resolves: bz#1408389
+  ([RHEL6.8.z] KVM guest shuts itself down after 128th reboot)
 
 * Wed Jul 27 2016 Miroslav Rezanina <mrezanin@redhat.com> - 0.12.1.2-2.491.el6_8.3
 - kvm-virtio-error-out-if-guest-exceeds-virtqueue-size.patch [bz#1359724]

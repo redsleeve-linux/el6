@@ -21,7 +21,7 @@ Summary:  The Berkeley Internet Name Domain (BIND) DNS (Domain Name System) serv
 Name:     bind
 License:  ISC
 Version:  9.8.2
-Release:  0.47.%{PREVER}%{?dist}.3
+Release:  0.47.%{PREVER}%{?dist}.4
 Epoch:    32
 Url:      http://www.isc.org/products/BIND/
 Buildroot:%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
@@ -123,6 +123,8 @@ Patch179:bind98-CVE-2016-1285-CVE-2016-1286.patch
 Patch180:bind98-CVE-2016-2776.patch
 Patch181:bind98-CVE-2016-2848.patch
 Patch182:bind98-CVE-2016-8864.patch
+Patch183:bind99-CVE-2016-9147.patch
+Patch184:bind99-rt43779.patch
 
 # SDB patches
 Patch11: bind-9.3.2b2-sdbsrc.patch
@@ -307,6 +309,8 @@ Based on the code from Jan "Yenya" Kasprzak <kas@fi.muni.cz>
 %patch133 -p1 -b .CVE-2012-1033
 %patch134 -p1 -b .CVE-2012-1033-2
 %patch182 -p1 -b .CVE-2016-8864
+%patch183 -p1 -b .CVE-2016-9147
+%patch184 -p1 -b .rt43779
 
 %if %{SDB}
 %patch101 -p1 -b .old-api
@@ -826,6 +830,10 @@ rm -rf ${RPM_BUILD_ROOT}
 %endif
 
 %changelog
+* Tue Jan 10 2017 Petr Menšík <pemensik@redhat.com> - 32:9.8.2-0.47.rc1.4
+- Fix CVE-2016-9147 (ISC change 4510)
+- Fix regression introduced by CVE-2016-8864 (ISC change 4530)
+
 * Mon Oct 31 2016 Tomas Hozza <thozza@redhat.com> - 32:9.8.2-0.47.rc1.3
 - Fix CVE-2016-8864
 

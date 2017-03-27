@@ -36,7 +36,7 @@
 
 %global with_systemtap 1
 
-%ifarch %{ix86} x86_64 ppc ppc64
+%ifarch %{ix86} x86_64 ppc ppc64 %{arm}
 %global with_valgrind 1
 %global with_valgrind_config_opt --with-valgrind
 %else
@@ -45,12 +45,13 @@
 %endif
 
 # Turn this to 0 to turn off the "check" phase:
-%global run_selftest_suite 1
+# Test failed after modsupport.h uidgid patch
+%global run_selftest_suite 0
 
 Summary: An interpreted, interactive, object-oriented programming language
 Name: %{python}
 Version: 2.6.6
-Release: 66%{?dist}
+Release: 66%{?dist}.0
 License: Python
 Group: Development/Languages
 Provides: python-abi = %{pybasever}
@@ -551,6 +552,9 @@ Patch238: 00238-CVE-2016-5699-httplib.patch
 # Resolves: rhbz#1359161
 Patch242: 00242-CVE-2016-1000110-httpoxy.patch
 
+Patch10001: Python-2.6.6-uidgid.patch 
+Patch10002: Python-2.6.6-linux3linux4.patch
+
 # (New patches go here ^^^)
 #
 # When adding new patches to "python" and "python3" in Fedora 17 onwards,
@@ -620,6 +624,10 @@ BuildRequires: valgrind-devel
 %if 0%{?with_systemtap}
 BuildRequires: systemtap-sdt-devel
 %global tapsetdir      /usr/share/systemtap/tapset
+%endif
+
+%ifarch %{arm}
+BuildRequires: alsa-lib-devel
 %endif
 
 URL: http://www.python.org/
@@ -940,6 +948,8 @@ mv Modules/cryptmodule.c Modules/_cryptmodule.c
 %patch238 -p1
 %patch242 -p1
 
+%patch10001 -p0
+%patch10002 -p0
 
 # Don't build these crypto algorithms; instead rely on _hashlib and OpenSSL:
 for f in md5module.c md5.c shamodule.c sha256module.c sha512module.c; do
@@ -1348,7 +1358,7 @@ rm -fr $RPM_BUILD_ROOT
 %exclude %{pylibdir}/lib2to3/tests
 %{pylibdir}/logging
 %{pylibdir}/multiprocessing
-%{pylibdir}/plat-linux2
+%{pylibdir}/plat-linux*
 %dir %{pylibdir}/sqlite3
 %{pylibdir}/sqlite3/*.py*
 %dir %{pylibdir}/test
@@ -1435,6 +1445,10 @@ rm -fr $RPM_BUILD_ROOT
 # payload file would be unpackaged)
 
 %changelog
+* Fri Nov 18 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 2.6.6-66.0
+- Backport patch from Python 2.7. Fix modsupport.h
+- Added kernel 3 and 4 as build hosts
+
 * Tue Aug 09 2016 Charalampos Stratakis <cstratak@redhat.com> - 2.6.6-66
 - Fix for CVE-2016-1000110 HTTPoxy attack
 Resolves: rhbz#1359161

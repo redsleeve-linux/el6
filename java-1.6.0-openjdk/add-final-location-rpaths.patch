@@ -7,15 +7,14 @@ linux capabilities are added to the binary.
 Fix launcher to treat the case where capabilities are set as
 identical to a setuid binary: don't expect LD_LIBRARY_PATH to be
 set.
-diff -r b85872bd06da Makefile.am
---- a/Makefile.am	Thu Apr 09 20:20:00 2015 +0100
-+++ b/Makefile.am	Thu Apr 09 20:41:52 2015 +0100
-@@ -815,7 +815,8 @@
- 	CC=$(CC)$(GCC_SUFFIX) \
+--- a/Makefile.am.orig	2017-01-03 02:21:55.611333388 -0500
++++ b/Makefile.am	2017-01-03 02:22:48.670489697 -0500
+@@ -837,7 +837,8 @@
  	CXX=$(CXX)$(GCC_SUFFIX) \
  	COMPILER_WARNINGS_FATAL="$(WERROR_STATUS)" \
--	UNLIMITED_CRYPTO="true"
-+	UNLIMITED_CRYPTO="true" \
+ 	UNLIMITED_CRYPTO="true" \
+-	ARM32JIT="${ARM32JIT_STATUS}"
++	ARM32JIT="${ARM32JIT_STATUS}" \
 +	INSTALL_LOCATION="${INSTALL_LOCATION}"
  
  if ENABLE_CACAO

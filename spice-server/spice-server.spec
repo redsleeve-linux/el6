@@ -3,7 +3,7 @@
 
 Name:           spice-server
 Version:        0.12.4
-Release:        13%{?dist}.1
+Release:        13%{?dist}.2
 Summary:        Implements the server side of the SPICE protocol
 Group:          System Environment/Libraries
 License:        LGPLv2+
@@ -67,6 +67,9 @@ Patch55: 0055-smartcard-add-a-ref-to-item-before-adding-to-pipe.patch
 Patch56: 0056-smartcard-allocate-msg-with-the-expected-size.patch
 Patch57: 0057-create-a-function-to-validate-surface-parameters.patch
 Patch58: 0058-improve-primary-surface-parameter-checks.patch
+Patch59: 0059-Prevent-possible-DoS-attempts-during-protocol-handsh.patch
+Patch60: 0060-Prevent-integer-overflows-in-capability-checks.patch
+Patch61: 0061-main-channel-Prevent-overflow-reading-messages-from-.patch
 
 
 Source100:      pyparsing.py
@@ -187,6 +190,9 @@ using %{name}, you will need to install %{name}-devel.
 %patch56 -p1
 %patch57 -p1
 %patch58 -p1
+%patch59 -p1
+%patch60 -p1
+%patch61 -p1
 
 
 # no point of calling git-version-gen for spice-common and also
@@ -236,6 +242,13 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
+* Fri Dec 09 2016 Frediano Ziglio <fziglio@redhat.com> - 0.12.4-13.2
+- Fix buffer overflow in main_channel_alloc_msg_rcv_buf when reading large
+  messages.
+  Resolves: CVE-2016-9577
+- Fix remote DoS via crafted message.
+  Resolves: CVE-2016-9578
+
 * Tue Apr 26 2016 Christophe Fergeau <cfergeau@redhat.com> - 0.12.4-13.1
 - Fix heap-based memory corruption within smartcard handling
   Resolves: CVE-2016-0749

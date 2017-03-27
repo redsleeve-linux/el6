@@ -42,7 +42,7 @@
 Summary:   X.Org X11 X server
 Name:      xorg-x11-server
 Version:   1.17.4
-Release:   9.5%{?gitdate:.%{gitdate}}%{?dist}
+Release:   9.5%{?gitdate:.%{gitdate}}%{?dist}.0
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X
@@ -331,6 +331,8 @@ Provides: xorg-x11-server-static
 Provides: xorg-x11-server-sdk = %{version}-%{release}
 Obsoletes: xorg-x11-glamor-devel < %{version}-%{release}
 Provides: xorg-x11-glamor-devel = %{version}-%{release}
+Provides: libxf86config-devel = %{version}-%{release} 
+Obsoletes: libxf86config-devel < 1.6.99-29 
 
 %description devel
 The SDK package provides the developmental files which are necessary for
@@ -441,6 +443,7 @@ export CFLAGS="${RPM_OPT_FLAGS} -Wl,-z,relro -fno-strict-aliasing"
 	--enable-glamor \
 	--disable-config-udev \
 	--disable-unit-tests \
+        --enable-install-libxf86config \
 	%{?wayland} \
 	%{dri_flags} %{?bodhi_flags} \
 	${CONFIGURE}
@@ -630,6 +633,7 @@ rm -rf $RPM_BUILD_ROOT
 %dir %{_includedir}/xorg
 %{sdkdir}/*.h
 %{_datadir}/aclocal/xorg-server.m4
+%{_libdir}/libxf86config.a
 %endif
 
 
@@ -638,6 +642,9 @@ rm -rf $RPM_BUILD_ROOT
 %{xserver_source_dir}
 
 %changelog
+* Sat Nov 19 2016 Bjarne Saltbaek <bjarne@redsleeve.org> 1.17.4-9.4.0
+- Re-added libxf86config since pyxf86config needs it
+
 * Tue Jul 12 2016 Johnny Hughes <johnny@centos.org> - 1.17.4-9.4
 - Removed upstream Branding in the SPEC file
 

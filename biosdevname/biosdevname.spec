@@ -1,6 +1,6 @@
 Name:		biosdevname
 Version:	0.7.1
-Release:	3%{?dist}.0
+Release:	3%{?dist}.1
 Summary:	Udev helper for naming devices per BIOS names
 
 Group:		System Environment/Base
@@ -23,6 +23,9 @@ Patch1: 0001-Enable-biosdevname-by-default-only-on-Dell-servers.patch
 Patch2: 0001-Fix-use-after-free-of-fd.patch
 Patch3: 0001-Remove-special-handling-for-ConnectX-4-devices.patch
 
+Patch10001: biosdevname-pic.patch
+Patch10002: biosdevname-0.7.1-disable-cpuid.patch
+
 %description
 biosdevname in its simplest form takes a kernel device name as an
 argument, and returns the BIOS-given name it "should" be.  This is necessary
@@ -35,6 +38,10 @@ name (e.g. eth0).
 %patch1 -p1 -b .off
 %patch2 -p1
 %patch3 -p1
+%ifarch %{arm}
+%patch10001 -p1
+%patch10002 -p0
+%endif
 
 %build
 autoreconf
@@ -56,6 +63,9 @@ make install install-data DESTDIR=%{buildroot}
 
 
 %changelog
+* Thu Nov 24 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 0.7.1-3.1
+- Disable cpuid for arm
+
 * Fri Sep 09 2016 Bjarne Saltbaek <bjarne@redsleeve.org> - 0.7.1-3.0
 - BR: flex-devel for %{arm}
 

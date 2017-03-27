@@ -37,7 +37,7 @@
 Name:		resource-agents
 Summary:	Open Source HA Reusable Cluster Resource Scripts
 Version:	3.9.5
-Release:	34%{?rcver:%{rcver}}%{?numcomm:.%{numcomm}}%{?alphatag:.%{alphatag}}%{?dirty:.%{dirty}}%{?dist}.2
+Release:	34%{?rcver:%{rcver}}%{?numcomm:.%{numcomm}}%{?alphatag:.%{alphatag}}%{?dirty:.%{dirty}}%{?dist}.3
 License:	GPLv2+ and LGPLv2+
 URL:		http://to.be.defined.com/
 %if 0%{?fedora} || 0%{?centos_version} || 0%{?rhel}
@@ -100,6 +100,8 @@ Patch49: 	bz1302545-portblock.patch
 Patch50:	bz1086838-oracle-data-guard.patch
 Patch51:	bz1311963-rgmanager-fix-clumanager-statd-ownership.patch
 Patch52:	bz1329547-tickle_tcp-fix.patch
+Patch53:	bz1413096-1-update-saphana-saphanatopology.patch
+Patch54:	bz1413096-2-update-saphana-saphanatopology.patch
 
 Obsoletes:	heartbeat-resources <= %{version}
 Provides:	heartbeat-resources = %{version}
@@ -269,6 +271,8 @@ exit 1
 %patch50 -p1
 %patch51 -p1
 %patch52 -p1
+%patch53 -p1
+%patch54 -p1
 
 %build
 ./autogen.sh
@@ -531,6 +535,11 @@ ccs_update_schema > /dev/null 2>&1 ||:
 
 
 %changelog
+* Mon Jan 16 2017 Oyvind Albrigtsen <oalbrigt@redhat.com> - 3.9.5-34.3
+- SAPHana/SAPHanaTopology: update to version 0.152.17
+
+  Resolves: rhbz#1413096
+
 * Mon Apr 25 2016 Oyvind Albrigtsen <oalbrigt@redhat.com> - 3.9.5-34.2
 - tickle_tcp: fix "Failed to open raw socket (Invalid argument)" issue
 
